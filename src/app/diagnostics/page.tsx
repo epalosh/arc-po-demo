@@ -22,12 +22,13 @@ export default function DiagnosticPage() {
     try {
       setLoading(true)
       
-      // Get boats with their boat types
+      // Get boats with their boat types, ordered by due date (production schedule order)
       const { data: boats } = await supabase
         .from('boats')
         .select('*, boat_types(*)')
         .eq('entity_id', selectedEntity.id)
         .in('status', ['scheduled', 'in_progress'])
+        .order('due_date', { ascending: true })
       
       // Get all active boat types (to check all parts that might be needed)
       const { data: boatTypes } = await supabase
@@ -63,8 +64,15 @@ export default function DiagnosticPage() {
         .order('created_at', { ascending: false })
         .limit(10)
       
-      // Analyze boats and requirements
-      const boatAnalysis = boats?.map(boat => {
+      // Create a running inventory tracker
+      // Initialize with current stock levels
+      const runningInventory = new Map<string, number>()
+      parts?.forEach(part => {
+        runningInventory.set(part.id, part.current_stock || 0)
+      })
+      
+      // Analyze boats and requirements with cumulative consumption
+      const boatAnalysis = boats?.map((boat, boatIndex) => {
         // Get MBOM from boat_type, not from boat itself
         const partsInMbom = boat.boat_types?.mbom?.parts || []
         const partIds = partsInMbom.map((p: any) => p.part_id)
@@ -74,16 +82,25 @@ export default function DiagnosticPage() {
           supplierParts?.some(sp => sp.part_id === partId)
         )
         
-        // Check stock levels
+        // Check stock levels accounting for previous boats' consumption
         const partsData = partsInMbom.map((mbomPart: any) => {
           const part = parts?.find(p => p.id === mbomPart.part_id)
           const hasSupplier = supplierParts?.some(sp => sp.part_id === mbomPart.part_id)
           
+          // Get the available stock BEFORE this boat (after previous boats consumed their parts)
+          const availableStock = runningInventory.get(mbomPart.part_id) || 0
+          const quantityNeeded = mbomPart.quantity_required
+          const netRequirement = Math.max(0, quantityNeeded - availableStock)
+          
+          // Update running inventory by consuming this boat's requirement
+          runningInventory.set(mbomPart.part_id, availableStock - quantityNeeded)
+          
           return {
+            part_id: mbomPart.part_id,
             part_name: mbomPart.part_name,
-            quantity_needed: mbomPart.quantity_required,
-            current_stock: part?.current_stock || 0,
-            net_requirement: Math.max(0, mbomPart.quantity_required - (part?.current_stock || 0)),
+            quantity_needed: quantityNeeded,
+            available_stock: availableStock,
+            net_requirement: netRequirement,
             has_supplier: hasSupplier,
             supplier_count: supplierParts?.filter(sp => sp.part_id === mbomPart.part_id).length || 0
           }
@@ -95,14 +112,30 @@ export default function DiagnosticPage() {
           due_date: boat.due_date,
           parts_count: partsInMbom.length,
           parts_with_suppliers: partsWithSuppliers.length,
-          parts_data: partsData
+          parts_data: partsData,
+          position_in_schedule: boatIndex + 1
         }
       })
+      
+      // Create final inventory summary (after all boats)
+      const finalInventorySummary = Array.from(runningInventory.entries()).map(([partId, remainingStock]) => {
+        const part = parts?.find(p => p.id === partId)
+        return {
+          part_id: partId,
+          part_name: part?.name || 'Unknown',
+          part_number: part?.part_number || 'Unknown',
+          initial_stock: part?.current_stock || 0,
+          final_stock: remainingStock,
+          total_consumed: (part?.current_stock || 0) - remainingStock
+        }
+      }).filter(item => item.total_consumed !== 0)
+        .sort((a, b) => a.final_stock - b.final_stock) // Sort by final stock (most negative first)
       
       setData({
         boats: boats || [],
         boatTypes: boatTypes || [],
         boatAnalysis,
+        finalInventorySummary,
         parts: parts || [],
         suppliers: suppliers || [],
         supplierParts: supplierParts || [],
@@ -156,11 +189,20 @@ export default function DiagnosticPage() {
 
         {/* Boat Analysis */}
         <Card title="Boat Requirements Analysis">
+          <div className="mb-4 p-3 bg-blue-50 border-l-4 border-blue-600">
+            <div className="font-mono text-sm text-blue-900">
+              <strong>Cumulative Consumption Model:</strong> Parts availability accounts for previous boats in the schedule. 
+              "Available" shows remaining stock after earlier boats consume their requirements. 
+              Negative values indicate backorders that will affect subsequent boats.
+            </div>
+          </div>
           {data.boatAnalysis.map((boat: any, idx: number) => (
             <div key={idx} className="mb-6 pb-6 border-b border-gray-300 last:border-0">
               <div className="flex justify-between items-start mb-3">
                 <div>
-                  <h3 className="font-mono font-bold text-lg">{boat.boat_name}</h3>
+                  <h3 className="font-mono font-bold text-lg">
+                    #{boat.position_in_schedule}: {boat.boat_name}
+                  </h3>
                   <div className="font-mono text-sm text-gray-600">
                     Due: {new Date(boat.due_date).toLocaleDateString()} | Status: {boat.status}
                   </div>
@@ -183,7 +225,7 @@ export default function DiagnosticPage() {
                     <tr>
                       <th className="text-left py-2">Part</th>
                       <th className="text-right py-2">Needed</th>
-                      <th className="text-right py-2">In Stock</th>
+                      <th className="text-right py-2">Available</th>
                       <th className="text-right py-2">Net Req</th>
                       <th className="text-center py-2">Supplier?</th>
                       <th className="text-right py-2"># Suppliers</th>
@@ -194,7 +236,13 @@ export default function DiagnosticPage() {
                       <tr key={pidx} className="border-b border-gray-200">
                         <td className="py-2">{part.part_name}</td>
                         <td className="text-right">{part.quantity_needed}</td>
-                        <td className="text-right">{part.current_stock}</td>
+                        <td className={`text-right ${
+                          part.available_stock < 0 ? 'text-red-600 font-bold' : 
+                          part.available_stock < part.quantity_needed ? 'text-orange-600' : 
+                          'text-gray-900'
+                        }`}>
+                          {part.available_stock}
+                        </td>
                         <td className={`text-right font-bold ${
                           part.net_requirement > 0 ? 'text-red-600' : 'text-green-600'
                         }`}>
@@ -211,6 +259,62 @@ export default function DiagnosticPage() {
               </div>
             </div>
           ))}
+        </Card>
+
+        {/* Final Inventory Summary */}
+        <Card title="Projected Inventory After All Scheduled Boats">
+          {data.finalInventorySummary && data.finalInventorySummary.length > 0 ? (
+            <>
+              <div className="mb-4 p-3 bg-yellow-50 border-l-4 border-yellow-600">
+                <div className="font-mono text-sm text-yellow-900">
+                  <strong>⚠️ Final Inventory Projection:</strong> Shows expected stock levels after fulfilling all scheduled boats. 
+                  Negative values indicate parts that need to be ordered.
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm font-mono">
+                  <thead className="border-b-2 border-black">
+                    <tr>
+                      <th className="text-left py-2">Part Number</th>
+                      <th className="text-left py-2">Part Name</th>
+                      <th className="text-right py-2">Initial Stock</th>
+                      <th className="text-right py-2">Total Consumed</th>
+                      <th className="text-right py-2">Final Stock</th>
+                      <th className="text-left py-2">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.finalInventorySummary.map((item: any, idx: number) => (
+                      <tr key={idx} className="border-b border-gray-200">
+                        <td className="py-2">{item.part_number}</td>
+                        <td>{item.part_name}</td>
+                        <td className="text-right">{item.initial_stock}</td>
+                        <td className="text-right">{item.total_consumed}</td>
+                        <td className={`text-right font-bold ${
+                          item.final_stock < 0 ? 'text-red-600' : 
+                          item.final_stock === 0 ? 'text-orange-600' : 
+                          'text-green-600'
+                        }`}>
+                          {item.final_stock}
+                        </td>
+                        <td className="text-left">
+                          {item.final_stock < 0 ? (
+                            <span className="text-red-600">⚠️ Need {Math.abs(item.final_stock)} more</span>
+                          ) : item.final_stock === 0 ? (
+                            <span className="text-orange-600">⚠️ Depleted</span>
+                          ) : (
+                            <span className="text-green-600">✓ Sufficient</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <div className="font-mono text-sm text-gray-600">No parts consumption detected for scheduled boats</div>
+          )}
         </Card>
 
         {/* Missing Supplier Relationships */}
