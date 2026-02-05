@@ -1,0 +1,286 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+import { supabase } from '@/lib/supabase'
+import { useEntity } from '@/contexts/EntityContext'
+import { Card } from '@/components/ui/Card'
+
+export default function DiagnosticPage() {
+  const { selectedEntity } = useEntity()
+  const [data, setData] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (selectedEntity) {
+      loadDiagnostics()
+    }
+  }, [selectedEntity])
+
+  async function loadDiagnostics() {
+    if (!selectedEntity) return
+    
+    try {
+      setLoading(true)
+      
+      // Get boats with their boat types
+      const { data: boats } = await supabase
+        .from('boats')
+        .select('*, boat_types(*)')
+        .eq('entity_id', selectedEntity.id)
+        .in('status', ['scheduled', 'in_progress'])
+      
+      // Get parts
+      const { data: parts } = await supabase
+        .from('parts')
+        .select('*')
+        .eq('entity_id', selectedEntity.id)
+      
+      // Get suppliers
+      const { data: suppliers } = await supabase
+        .from('suppliers')
+        .select('*')
+        .eq('entity_id', selectedEntity.id)
+      
+      // Get supplier parts
+      const { data: supplierParts } = await supabase
+        .from('supplier_parts')
+        .select('*, parts(part_number, name), suppliers(name)')
+        .eq('entity_id', selectedEntity.id)
+      
+      // Get generated POs
+      const { data: pos } = await supabase
+        .from('purchase_orders')
+        .select('*, suppliers(name)')
+        .eq('entity_id', selectedEntity.id)
+        .eq('generated_by_system', true)
+        .order('created_at', { ascending: false })
+        .limit(10)
+      
+      // Analyze boats and requirements
+      const boatAnalysis = boats?.map(boat => {
+        // Get MBOM from boat_type, not from boat itself
+        const partsInMbom = boat.boat_types?.mbom?.parts || []
+        const partIds = partsInMbom.map((p: any) => p.part_id)
+        
+        // Check which parts have supplier relationships
+        const partsWithSuppliers = partIds.filter((partId: string) => 
+          supplierParts?.some(sp => sp.part_id === partId)
+        )
+        
+        // Check stock levels
+        const partsData = partsInMbom.map((mbomPart: any) => {
+          const part = parts?.find(p => p.id === mbomPart.part_id)
+          const hasSupplier = supplierParts?.some(sp => sp.part_id === mbomPart.part_id)
+          
+          return {
+            part_name: mbomPart.part_name,
+            quantity_needed: mbomPart.quantity_required,
+            current_stock: part?.current_stock || 0,
+            net_requirement: Math.max(0, mbomPart.quantity_required - (part?.current_stock || 0)),
+            has_supplier: hasSupplier,
+            supplier_count: supplierParts?.filter(sp => sp.part_id === mbomPart.part_id).length || 0
+          }
+        })
+        
+        return {
+          boat_name: boat.name,
+          status: boat.status,
+          due_date: boat.due_date,
+          parts_count: partsInMbom.length,
+          parts_with_suppliers: partsWithSuppliers.length,
+          parts_data: partsData
+        }
+      })
+      
+      setData({
+        boats: boats || [],
+        boatAnalysis,
+        parts: parts || [],
+        suppliers: suppliers || [],
+        supplierParts: supplierParts || [],
+        pos: pos || []
+      })
+    } catch (error) {
+      console.error('Error loading diagnostics:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (!selectedEntity) {
+    return <div className="max-w-7xl mx-auto px-6 py-8 font-mono text-gray-600">Please select an entity</div>
+  }
+
+  if (loading) {
+    return <div className="max-w-7xl mx-auto px-6 py-8 font-mono">Loading diagnostics...</div>
+  }
+
+  if (!data) {
+    return <div className="max-w-7xl mx-auto px-6 py-8 font-mono text-red-600">Error loading data</div>
+  }
+
+  return (
+    <div className="max-w-7xl mx-auto px-6 py-8">
+      <h1 className="font-mono text-3xl font-bold text-black mb-8">PO Generation Diagnostics</h1>
+      
+      <div className="space-y-6">
+        {/* Summary Stats */}
+        <Card title="Summary">
+          <div className="grid grid-cols-4 gap-4">
+            <div>
+              <div className="font-mono text-2xl font-bold">{data.boats.length}</div>
+              <div className="font-mono text-xs text-gray-600">Active Boats</div>
+            </div>
+            <div>
+              <div className="font-mono text-2xl font-bold">{data.parts.length}</div>
+              <div className="font-mono text-xs text-gray-600">Total Parts</div>
+            </div>
+            <div>
+              <div className="font-mono text-2xl font-bold">{data.suppliers.length}</div>
+              <div className="font-mono text-xs text-gray-600">Suppliers</div>
+            </div>
+            <div>
+              <div className="font-mono text-2xl font-bold">{data.supplierParts.length}</div>
+              <div className="font-mono text-xs text-gray-600">Supplier-Part Links</div>
+            </div>
+          </div>
+        </Card>
+
+        {/* Boat Analysis */}
+        <Card title="Boat Requirements Analysis">
+          {data.boatAnalysis.map((boat: any, idx: number) => (
+            <div key={idx} className="mb-6 pb-6 border-b border-gray-300 last:border-0">
+              <div className="flex justify-between items-start mb-3">
+                <div>
+                  <h3 className="font-mono font-bold text-lg">{boat.boat_name}</h3>
+                  <div className="font-mono text-sm text-gray-600">
+                    Due: {new Date(boat.due_date).toLocaleDateString()} | Status: {boat.status}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="font-mono text-sm">
+                    {boat.parts_count} parts in MBOM
+                  </div>
+                  <div className={`font-mono text-sm ${
+                    boat.parts_with_suppliers === boat.parts_count ? 'text-green-600' : 'text-red-600'
+                  }`}>
+                    {boat.parts_with_suppliers} have suppliers
+                  </div>
+                </div>
+              </div>
+              
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs font-mono">
+                  <thead className="border-b-2 border-black">
+                    <tr>
+                      <th className="text-left py-2">Part</th>
+                      <th className="text-right py-2">Needed</th>
+                      <th className="text-right py-2">In Stock</th>
+                      <th className="text-right py-2">Net Req</th>
+                      <th className="text-center py-2">Supplier?</th>
+                      <th className="text-right py-2"># Suppliers</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {boat.parts_data.map((part: any, pidx: number) => (
+                      <tr key={pidx} className="border-b border-gray-200">
+                        <td className="py-2">{part.part_name}</td>
+                        <td className="text-right">{part.quantity_needed}</td>
+                        <td className="text-right">{part.current_stock}</td>
+                        <td className={`text-right font-bold ${
+                          part.net_requirement > 0 ? 'text-red-600' : 'text-green-600'
+                        }`}>
+                          {part.net_requirement}
+                        </td>
+                        <td className="text-center">
+                          {part.has_supplier ? '✓' : '✗'}
+                        </td>
+                        <td className="text-right">{part.supplier_count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
+        </Card>
+
+        {/* Missing Supplier Relationships */}
+        <Card title="Parts Without Suppliers">
+          {(() => {
+            const allPartIds = new Set<string>()
+            data.boats.forEach((boat: any) => {
+              boat.boat_types?.mbom?.parts?.forEach((part: any) => {
+                allPartIds.add(part.part_id)
+              })
+            })
+            
+            const partsWithoutSuppliers = Array.from(allPartIds).filter(partId => 
+              !data.supplierParts.some((sp: any) => sp.part_id === partId)
+            ).map(partId => {
+              const boat = data.boats.find((b: any) => 
+                b.boat_types?.mbom?.parts?.some((p: any) => p.part_id === partId)
+              )
+              const mbomPart = boat?.boat_types?.mbom?.parts?.find((p: any) => p.part_id === partId)
+              return {
+                part_id: partId,
+                part_name: mbomPart?.part_name || 'Unknown',
+                used_in_boats: data.boats.filter((b: any) => 
+                  b.boat_types?.mbom?.parts?.some((p: any) => p.part_id === partId)
+                ).length
+              }
+            })
+            
+            if (partsWithoutSuppliers.length === 0) {
+              return <div className="font-mono text-sm text-green-600">✓ All parts have supplier relationships</div>
+            }
+            
+            return (
+              <div className="space-y-2">
+                <div className="font-mono text-sm text-red-600 mb-3">
+                  ⚠ {partsWithoutSuppliers.length} parts need supplier relationships
+                </div>
+                {partsWithoutSuppliers.map((part: any, idx: number) => (
+                  <div key={idx} className="font-mono text-sm border-l-4 border-red-600 pl-3">
+                    <div className="font-bold">{part.part_name}</div>
+                    <div className="text-xs text-gray-600">Used in {part.used_in_boats} boat(s)</div>
+                  </div>
+                ))}
+              </div>
+            )
+          })()}
+        </Card>
+
+        {/* Recent Generated POs */}
+        <Card title="Recently Generated POs">
+          {data.pos.length === 0 ? (
+            <div className="font-mono text-sm text-gray-600">No generated POs yet</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm font-mono">
+                <thead className="border-b-2 border-black">
+                  <tr>
+                    <th className="text-left py-2">PO Number</th>
+                    <th className="text-left py-2">Supplier</th>
+                    <th className="text-left py-2">Order Date</th>
+                    <th className="text-right py-2">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.pos.map((po: any) => (
+                    <tr key={po.id} className="border-b border-gray-200">
+                      <td className="py-2">{po.po_number}</td>
+                      <td>{po.suppliers?.name}</td>
+                      <td>{new Date(po.order_date).toLocaleDateString()}</td>
+                      <td className="text-right">${po.total_amount.toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      </div>
+    </div>
+  )
+}
