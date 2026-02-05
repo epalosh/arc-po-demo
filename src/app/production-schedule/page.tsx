@@ -5,6 +5,11 @@ import { supabase } from '@/lib/supabase'
 import { Boat, BoatType } from '@/types/database'
 import { useEntity } from '@/contexts/EntityContext'
 import { Card } from '@/components/ui/Card'
+import { Modal } from '@/components/ui/Modal'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
+import { Select } from '@/components/ui/Select'
+import { Textarea } from '@/components/ui/Textarea'
 
 interface ScheduleItem extends Boat {
   startDate: Date
@@ -16,10 +21,30 @@ interface ScheduleItem extends Boat {
 export default function ProductionSchedulePage() {
   const { selectedEntity } = useEntity()
   const [boats, setBoats] = useState<ScheduleItem[]>([])
+  const [boatTypes, setBoatTypes] = useState<BoatType[]>([])
   const [loading, setLoading] = useState(true)
   const [viewMode, setViewMode] = useState<'calendar' | 'timeline' | 'list'>('calendar')
   const [filterStatus, setFilterStatus] = useState<'all' | 'scheduled' | 'in_progress' | 'completed'>('all')
   const [currentMonth, setCurrentMonth] = useState(new Date())
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false)
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
+  const [editingBoat, setEditingBoat] = useState<ScheduleItem | null>(null)
+  const [editFormData, setEditFormData] = useState({
+    boat_type_id: '',
+    name: '',
+    due_date: '',
+    manufacturing_time_days: 0,
+    status: 'scheduled' as 'scheduled' | 'in_progress' | 'completed',
+    notes: ''
+  })
+  const [createFormData, setCreateFormData] = useState({
+    boat_type_id: '',
+    name: '',
+    due_date: '',
+    manufacturing_time_days: 14,
+    status: 'scheduled' as 'scheduled' | 'in_progress' | 'completed',
+    notes: ''
+  })
 
   useEffect(() => {
     if (selectedEntity) {
@@ -32,18 +57,27 @@ export default function ProductionSchedulePage() {
     
     try {
       setLoading(true)
-      const { data, error } = await supabase
-        .from('boats')
-        .select(`
-          *,
-          boat_type:boat_types(*)
-        `)
-        .eq('entity_id', selectedEntity.id)
-        .order('due_date', { ascending: true })
+      const [boatsRes, boatTypesRes] = await Promise.all([
+        supabase
+          .from('boats')
+          .select(`
+            *,
+            boat_type:boat_types(*)
+          `)
+          .eq('entity_id', selectedEntity.id)
+          .order('due_date', { ascending: true }),
+        supabase
+          .from('boat_types')
+          .select('*')
+          .eq('entity_id', selectedEntity.id)
+          .eq('is_active', true)
+          .order('name')
+      ])
       
-      if (error) throw error
+      if (boatsRes.error) throw boatsRes.error
+      if (boatTypesRes.error) throw boatTypesRes.error
       
-      const scheduleItems: ScheduleItem[] = (data || []).map(boat => {
+      const scheduleItems: ScheduleItem[] = (boatsRes.data || []).map(boat => {
         const dueDate = new Date(boat.due_date)
         const startDate = new Date(dueDate)
         startDate.setDate(startDate.getDate() - boat.manufacturing_time_days)
@@ -61,6 +95,7 @@ export default function ProductionSchedulePage() {
       })
       
       setBoats(scheduleItems)
+      setBoatTypes(boatTypesRes.data || [])
     } catch (error) {
       console.error('Error loading schedule:', error)
       alert('Error loading production schedule')
@@ -72,6 +107,143 @@ export default function ProductionSchedulePage() {
   function getFilteredBoats() {
     if (filterStatus === 'all') return boats
     return boats.filter(boat => boat.status === filterStatus)
+  }
+
+  function openEditModal(boat: ScheduleItem) {
+    setEditingBoat(boat)
+    setEditFormData({
+      boat_type_id: boat.boat_type_id,
+      name: boat.name,
+      due_date: boat.due_date.split('T')[0], // Format as YYYY-MM-DD for input[type="date"]
+      manufacturing_time_days: boat.manufacturing_time_days,
+      status: boat.status,
+      notes: boat.notes || ''
+    })
+    setIsEditModalOpen(true)
+  }
+
+  function openCreateModal() {
+    setCreateFormData({
+      boat_type_id: '',
+      name: '',
+      due_date: '',
+      manufacturing_time_days: 14,
+      status: 'scheduled',
+      notes: ''
+    })
+    setIsCreateModalOpen(true)
+  }
+
+  function handleBoatTypeSelection(boatTypeId: string) {
+    const selectedType = boatTypes.find(bt => bt.id === boatTypeId)
+    setCreateFormData({
+      ...createFormData,
+      boat_type_id: boatTypeId,
+      manufacturing_time_days: selectedType?.default_manufacturing_time_days || 14
+    })
+  }
+
+  function handleEditBoatTypeSelection(boatTypeId: string) {
+    const selectedType = boatTypes.find(bt => bt.id === boatTypeId)
+    setEditFormData({
+      ...editFormData,
+      boat_type_id: boatTypeId,
+      manufacturing_time_days: selectedType?.default_manufacturing_time_days || editFormData.manufacturing_time_days
+    })
+  }
+
+  async function handleCreateBoat(e: React.FormEvent) {
+    e.preventDefault()
+    if (!selectedEntity) return
+
+    const selectedType = boatTypes.find(bt => bt.id === createFormData.boat_type_id)
+    if (!selectedType) {
+      alert('Please select a boat type')
+      return
+    }
+
+    try {
+      const { error } = await supabase
+        .from('boats')
+        .insert([{
+          entity_id: selectedEntity.id,
+          boat_type_id: createFormData.boat_type_id,
+          name: createFormData.name,
+          model: selectedType.model,
+          due_date: createFormData.due_date,
+          manufacturing_time_days: createFormData.manufacturing_time_days,
+          status: createFormData.status,
+          mbom: { parts: [] }, // Empty MBOM, inherits from boat_type
+          notes: createFormData.notes
+        }])
+
+      if (error) throw error
+
+      setIsCreateModalOpen(false)
+      loadSchedule() // Reload the schedule
+    } catch (error) {
+      console.error('Error creating boat:', error)
+      alert('Error scheduling production unit')
+    }
+  }
+
+  async function handleUpdateBoat(e: React.FormEvent) {
+    e.preventDefault()
+    if (!editingBoat) return
+
+    const selectedType = boatTypes.find(bt => bt.id === editFormData.boat_type_id)
+    if (!selectedType) {
+      alert('Please select a valid boat type')
+      return
+    }
+
+    try {
+      const { error } = await supabase
+        .from('boats')
+        .update({
+          boat_type_id: editFormData.boat_type_id,
+          name: editFormData.name,
+          model: selectedType.model, // Update model based on selected boat type
+          due_date: editFormData.due_date,
+          manufacturing_time_days: editFormData.manufacturing_time_days,
+          status: editFormData.status,
+          notes: editFormData.notes
+        })
+        .eq('id', editingBoat.id)
+
+      if (error) throw error
+
+      setIsEditModalOpen(false)
+      setEditingBoat(null)
+      loadSchedule() // Reload the schedule
+    } catch (error) {
+      console.error('Error updating boat:', error)
+      alert('Error updating production unit')
+    }
+  }
+
+  async function handleDeleteBoat() {
+    if (!editingBoat) return
+    
+    if (!confirm(`Are you sure you want to delete "${editingBoat.name}"? This action cannot be undone.`)) {
+      return
+    }
+
+    try {
+      const { error } = await supabase
+        .from('boats')
+        .delete()
+        .eq('id', editingBoat.id)
+
+      if (error) throw error
+
+      setIsEditModalOpen(false)
+      setEditingBoat(null)
+      loadSchedule() // Reload the schedule
+    } catch (error) {
+      console.error('Error deleting boat:', error)
+      alert('Error deleting production unit')
+    }
   }
 
   function getStatusColor(status: string) {
@@ -273,11 +445,16 @@ export default function ProductionSchedulePage() {
 
   return (
     <div className="max-w-7xl mx-auto px-6 py-8">
-      <div className="mb-8">
-        <h1 className="font-mono text-3xl font-bold text-black mb-2">Production Schedule</h1>
-        <p className="font-mono text-sm text-gray-600">
-          Individual production units scheduled for manufacturing
-        </p>
+      <div className="mb-8 flex justify-between items-start">
+        <div>
+          <h1 className="font-mono text-3xl font-bold text-black mb-2">Production Schedule</h1>
+          <p className="font-mono text-sm text-gray-600">
+            Individual production units scheduled for manufacturing
+          </p>
+        </div>
+        <Button onClick={openCreateModal} disabled={!selectedEntity}>
+          Schedule New Boat
+        </Button>
       </div>
 
       {/* Statistics Cards */}
@@ -508,6 +685,7 @@ export default function ProductionSchedulePage() {
                             height: '22px',
                             zIndex: 10 + layer
                           }}
+                          onClick={() => openEditModal(boat)}
                           title={`${boat.name} - ${boat.model}\nStatus: ${boat.status}\n${boat.startDate.toLocaleDateString()} - ${boat.endDate.toLocaleDateString()}\nMfg Time: ${boat.manufacturing_time_days} days`}
                         >
                           <div className="font-mono text-xs font-bold truncate leading-tight">
@@ -546,6 +724,7 @@ export default function ProductionSchedulePage() {
                               height: '22px',
                               zIndex: 10 + layer
                             }}
+                            onClick={() => openEditModal(boat)}
                             title={`${boat.name} - ${boat.model}\nStatus: ${boat.status}\n${boat.startDate.toLocaleDateString()} - ${boat.endDate.toLocaleDateString()}\nMfg Time: ${boat.manufacturing_time_days} days`}
                           >
                             <div className="font-mono text-xs font-bold truncate leading-tight">
@@ -606,7 +785,7 @@ export default function ProductionSchedulePage() {
                           Model: {boat.model}
                         </div>
                       </div>
-                      <div className="text-right">
+                      <div className="flex flex-col items-end gap-2">
                         <div className={`font-mono text-sm font-bold ${getUrgencyColor(boat.daysUntilDue)}`}>
                           {boat.daysUntilDue < 0 ? (
                             `${Math.abs(boat.daysUntilDue)} days overdue`
@@ -616,6 +795,12 @@ export default function ProductionSchedulePage() {
                             `${boat.daysUntilDue} days until due`
                           )}
                         </div>
+                        <button
+                          onClick={() => openEditModal(boat)}
+                          className="font-mono text-sm text-black hover:underline"
+                        >
+                          Edit Schedule
+                        </button>
                       </div>
                     </div>
 
@@ -689,6 +874,9 @@ export default function ProductionSchedulePage() {
                   <th className="px-4 py-3 text-left font-mono text-sm font-bold text-black">
                     Days Until Due
                   </th>
+                  <th className="px-4 py-3 text-left font-mono text-sm font-bold text-black">
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -726,6 +914,14 @@ export default function ProductionSchedulePage() {
                         `${boat.daysUntilDue}d`
                       )}
                     </td>
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={() => openEditModal(boat)}
+                        className="font-mono text-sm text-black hover:underline"
+                      >
+                        Edit
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -733,6 +929,229 @@ export default function ProductionSchedulePage() {
           </div>
         </Card>
       )}
+
+      {/* Edit Modal */}
+      <Modal
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+        title={`Edit Production Unit: ${editingBoat?.name || ''}`}
+        footer={
+          <div className="flex justify-between w-full">
+            <Button 
+              variant="danger" 
+              onClick={handleDeleteBoat}
+            >
+              Delete
+            </Button>
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={() => setIsEditModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleUpdateBoat}>
+                Update
+              </Button>
+            </div>
+          </div>
+        }
+      >
+        <form onSubmit={handleUpdateBoat} className="space-y-4">
+          <Select
+            label="Boat Type *"
+            value={editFormData.boat_type_id}
+            onChange={(e) => handleEditBoatTypeSelection(e.target.value)}
+            options={[
+              { value: '', label: '-- Select Boat Type --' },
+              ...boatTypes.map(bt => ({ 
+                value: bt.id, 
+                label: `${bt.name} (${bt.model})` 
+              }))
+            ]}
+            required
+          />
+
+          {editFormData.boat_type_id && (
+            <div className="p-3 bg-gray-100 border border-gray-300 font-mono text-xs">
+              <div className="text-gray-700 mb-1">
+                <strong>Selected Type:</strong>
+              </div>
+              <div className="text-black">
+                {boatTypes.find(bt => bt.id === editFormData.boat_type_id)?.description || 'No description'}
+              </div>
+            </div>
+          )}
+
+          <Input
+            label="Production Unit Name *"
+            type="text"
+            value={editFormData.name}
+            onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
+            placeholder="e.g., Bay Runner Unit #7"
+            required
+          />
+
+          <Input
+            label="Due Date *"
+            type="date"
+            value={editFormData.due_date}
+            onChange={(e) => setEditFormData({ ...editFormData, due_date: e.target.value })}
+            required
+          />
+
+          <Input
+            label="Manufacturing Time (days) *"
+            type="number"
+            min="1"
+            value={editFormData.manufacturing_time_days}
+            onChange={(e) => setEditFormData({ ...editFormData, manufacturing_time_days: parseInt(e.target.value) || 1 })}
+            required
+          />
+
+          <Select
+            label="Status *"
+            value={editFormData.status}
+            onChange={(e) => setEditFormData({ ...editFormData, status: e.target.value as any })}
+            options={[
+              { value: 'scheduled', label: 'Scheduled' },
+              { value: 'in_progress', label: 'In Progress' },
+              { value: 'completed', label: 'Completed' }
+            ]}
+            required
+          />
+
+          <Textarea
+            label="Notes"
+            value={editFormData.notes}
+            onChange={(e) => setEditFormData({ ...editFormData, notes: e.target.value })}
+            rows={3}
+          />
+
+          <div className="mt-4 p-3 bg-gray-100 border border-gray-300 font-mono text-xs">
+            <div className="text-gray-700 mb-2">
+              <strong>Calculated Start Date:</strong>
+            </div>
+            <div className="text-black">
+              {editFormData.due_date && editFormData.manufacturing_time_days ? (
+                (() => {
+                  const dueDate = new Date(editFormData.due_date)
+                  const startDate = new Date(dueDate)
+                  startDate.setDate(startDate.getDate() - editFormData.manufacturing_time_days)
+                  return startDate.toLocaleDateString()
+                })()
+              ) : (
+                '—'
+              )}
+            </div>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Create Modal */}
+      <Modal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        title="Schedule New Production Unit"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setIsCreateModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateBoat}>
+              Schedule Boat
+            </Button>
+          </>
+        }
+      >
+        <form onSubmit={handleCreateBoat} className="space-y-4">
+          <Select
+            label="Boat Type *"
+            value={createFormData.boat_type_id}
+            onChange={(e) => handleBoatTypeSelection(e.target.value)}
+            options={[
+              { value: '', label: '-- Select Boat Type --' },
+              ...boatTypes.map(bt => ({ 
+                value: bt.id, 
+                label: `${bt.name} (${bt.model})` 
+              }))
+            ]}
+            required
+          />
+
+          {createFormData.boat_type_id && (
+            <div className="p-3 bg-gray-100 border border-gray-300 font-mono text-xs">
+              <div className="text-gray-700 mb-1">
+                <strong>Selected Type:</strong>
+              </div>
+              <div className="text-black">
+                {boatTypes.find(bt => bt.id === createFormData.boat_type_id)?.description || 'No description'}
+              </div>
+            </div>
+          )}
+
+          <Input
+            label="Production Unit Name *"
+            type="text"
+            value={createFormData.name}
+            onChange={(e) => setCreateFormData({ ...createFormData, name: e.target.value })}
+            placeholder="e.g., Bay Runner Unit #7"
+            required
+          />
+
+          <Input
+            label="Due Date *"
+            type="date"
+            value={createFormData.due_date}
+            onChange={(e) => setCreateFormData({ ...createFormData, due_date: e.target.value })}
+            required
+          />
+
+          <Input
+            label="Manufacturing Time (days) *"
+            type="number"
+            min="1"
+            value={createFormData.manufacturing_time_days}
+            onChange={(e) => setCreateFormData({ ...createFormData, manufacturing_time_days: parseInt(e.target.value) || 1 })}
+            required
+          />
+
+          <Select
+            label="Status *"
+            value={createFormData.status}
+            onChange={(e) => setCreateFormData({ ...createFormData, status: e.target.value as any })}
+            options={[
+              { value: 'scheduled', label: 'Scheduled' },
+              { value: 'in_progress', label: 'In Progress' },
+              { value: 'completed', label: 'Completed' }
+            ]}
+            required
+          />
+
+          <Textarea
+            label="Notes"
+            value={createFormData.notes}
+            onChange={(e) => setCreateFormData({ ...createFormData, notes: e.target.value })}
+            rows={3}
+            placeholder="Optional notes about this production unit..."
+          />
+
+          <div className="mt-4 p-3 bg-blue-50 border border-blue-300 font-mono text-xs">
+            <div className="text-blue-700 mb-2">
+              <strong>Calculated Start Date:</strong>
+            </div>
+            <div className="text-black">
+              {createFormData.due_date && createFormData.manufacturing_time_days ? (
+                (() => {
+                  const dueDate = new Date(createFormData.due_date)
+                  const startDate = new Date(dueDate)
+                  startDate.setDate(startDate.getDate() - createFormData.manufacturing_time_days)
+                  return startDate.toLocaleDateString()
+                })()
+              ) : (
+                '—'
+              )}
+            </div>
+          </div>
+        </form>
+      </Modal>
     </div>
   )
 }

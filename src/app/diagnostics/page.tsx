@@ -29,6 +29,13 @@ export default function DiagnosticPage() {
         .eq('entity_id', selectedEntity.id)
         .in('status', ['scheduled', 'in_progress'])
       
+      // Get all active boat types (to check all parts that might be needed)
+      const { data: boatTypes } = await supabase
+        .from('boat_types')
+        .select('*')
+        .eq('entity_id', selectedEntity.id)
+        .eq('is_active', true)
+      
       // Get parts
       const { data: parts } = await supabase
         .from('parts')
@@ -94,6 +101,7 @@ export default function DiagnosticPage() {
       
       setData({
         boats: boats || [],
+        boatTypes: boatTypes || [],
         boatAnalysis,
         parts: parts || [],
         suppliers: suppliers || [],
@@ -208,31 +216,38 @@ export default function DiagnosticPage() {
         {/* Missing Supplier Relationships */}
         <Card title="Parts Without Suppliers">
           {(() => {
+            // Check all parts used in active boat types (not just scheduled boats)
             const allPartIds = new Set<string>()
-            data.boats.forEach((boat: any) => {
-              boat.boat_types?.mbom?.parts?.forEach((part: any) => {
+            const partToBoatTypeMap = new Map<string, Set<string>>()
+            
+            data.boatTypes?.forEach((boatType: any) => {
+              boatType.mbom?.parts?.forEach((part: any) => {
                 allPartIds.add(part.part_id)
+                if (!partToBoatTypeMap.has(part.part_id)) {
+                  partToBoatTypeMap.set(part.part_id, new Set())
+                }
+                partToBoatTypeMap.get(part.part_id)?.add(boatType.name)
               })
             })
             
             const partsWithoutSuppliers = Array.from(allPartIds).filter(partId => 
               !data.supplierParts.some((sp: any) => sp.part_id === partId)
             ).map(partId => {
-              const boat = data.boats.find((b: any) => 
-                b.boat_types?.mbom?.parts?.some((p: any) => p.part_id === partId)
+              const boatType = data.boatTypes?.find((bt: any) => 
+                bt.mbom?.parts?.some((p: any) => p.part_id === partId)
               )
-              const mbomPart = boat?.boat_types?.mbom?.parts?.find((p: any) => p.part_id === partId)
+              const mbomPart = boatType?.mbom?.parts?.find((p: any) => p.part_id === partId)
+              const usedInBoatTypes = partToBoatTypeMap.get(partId)
+              
               return {
                 part_id: partId,
                 part_name: mbomPart?.part_name || 'Unknown',
-                used_in_boats: data.boats.filter((b: any) => 
-                  b.boat_types?.mbom?.parts?.some((p: any) => p.part_id === partId)
-                ).length
+                used_in_boat_types: Array.from(usedInBoatTypes || [])
               }
             })
             
             if (partsWithoutSuppliers.length === 0) {
-              return <div className="font-mono text-sm text-green-600">✓ All parts have supplier relationships</div>
+              return <div className="font-mono text-sm text-green-600">✓ All parts in active boat types have supplier relationships</div>
             }
             
             return (
@@ -241,9 +256,11 @@ export default function DiagnosticPage() {
                   ⚠ {partsWithoutSuppliers.length} parts need supplier relationships
                 </div>
                 {partsWithoutSuppliers.map((part: any, idx: number) => (
-                  <div key={idx} className="font-mono text-sm border-l-4 border-red-600 pl-3">
+                  <div key={idx} className="font-mono text-sm border-l-4 border-red-600 pl-3 py-2">
                     <div className="font-bold">{part.part_name}</div>
-                    <div className="text-xs text-gray-600">Used in {part.used_in_boats} boat(s)</div>
+                    <div className="text-xs text-gray-600">
+                      Used in boat type(s): {part.used_in_boat_types.join(', ')}
+                    </div>
                   </div>
                 ))}
               </div>

@@ -101,6 +101,18 @@ export default function SupplierPartsPage() {
     setIsModalOpen(true)
   }
 
+  function handlePartSelection(partId: string) {
+    const selectedPart = parts.find(p => p.id === partId)
+    setFormData({ 
+      ...formData, 
+      part_id: partId,
+      // Only autopopulate if creating new (not editing) and part has a unit cost
+      price_per_unit: !editingSupplierPart && selectedPart?.unit_cost 
+        ? selectedPart.unit_cost 
+        : formData.price_per_unit
+    })
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     
@@ -237,7 +249,7 @@ export default function SupplierPartsPage() {
           <Select
             label="Part *"
             value={formData.part_id}
-            onChange={(e) => setFormData({ ...formData, part_id: e.target.value })}
+            onChange={(e) => handlePartSelection(e.target.value)}
             options={[
               { value: '', label: '-- Select Part --' },
               ...parts.map(p => ({ value: p.id, label: `${p.part_number} - ${p.name}` }))
