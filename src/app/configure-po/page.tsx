@@ -394,41 +394,41 @@ export default function ConfigurePOPage() {
 
           <Card title="Parts Required">
             <div className="overflow-x-auto">
-              <table className="w-full text-xs font-mono">
+              <table className="w-full font-mono">
                 <thead className="border-b-2 border-black">
-                  <tr>
-                    <th className="text-left py-2">Part #</th>
-                    <th className="text-left py-2">Name</th>
-                    <th className="text-right py-2">Net Qty</th>
-                    <th className="text-right py-2">Unit Cost</th>
-                    <th className="text-right py-2">Total</th>
-                    <th className="text-left py-2">Need By</th>
-                    <th className="text-center py-2">Lead Time</th>
-                    <th className="text-right py-2">MOQ</th>
-                    <th className="text-right py-2">Batch</th>
+                  <tr className="text-sm">
+                    <th className="text-left py-3 pr-6 font-bold">Part #</th>
+                    <th className="text-left py-3 pr-6 font-bold">Name</th>
+                    <th className="text-right py-3 pr-6 font-bold">Net Qty</th>
+                    <th className="text-right py-3 pr-6 font-bold">Unit Cost</th>
+                    <th className="text-right py-3 pr-6 font-bold">Total</th>
+                    <th className="text-left py-3 pr-6 font-bold">Need By</th>
+                    <th className="text-center py-3 pr-6 font-bold">Lead Time</th>
+                    <th className="text-right py-3 pr-6 font-bold">MOQ</th>
+                    <th className="text-right py-3 font-bold">Batch</th>
                   </tr>
                 </thead>
                 <tbody>
                   {supplier.parts.map(part => (
-                    <tr key={part.part_id} className="border-b border-gray-200">
-                      <td className="py-2">{part.part_number}</td>
-                      <td>{part.part_name}</td>
-                      <td className="text-right font-bold">{part.net_quantity_needed}</td>
-                      <td className="text-right">${part.unit_cost.toFixed(2)}</td>
-                      <td className="text-right font-bold">${part.total_cost.toLocaleString()}</td>
-                      <td className="text-left text-xs">
+                    <tr key={part.part_id} className="border-b border-gray-300 text-sm">
+                      <td className="py-4 pr-6">{part.part_number}</td>
+                      <td className="py-4 pr-6">{part.part_name}</td>
+                      <td className="text-right py-4 pr-6 font-semibold">{part.net_quantity_needed}</td>
+                      <td className="text-right py-4 pr-6">${part.unit_cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      <td className="text-right py-4 pr-6 font-semibold">${part.total_cost.toLocaleString()}</td>
+                      <td className="text-left py-4 pr-6">
                         {new Date(parseInt(part.earliest_need_date)).toLocaleDateString()}
                       </td>
-                      <td className="text-center">{part.lead_time_days}d</td>
-                      <td className="text-right">{part.minimum_order_quantity}</td>
-                      <td className="text-right">{part.batch_size}</td>
+                      <td className="text-center py-4 pr-6">{part.lead_time_days}d</td>
+                      <td className="text-right py-4 pr-6">{part.minimum_order_quantity}</td>
+                      <td className="text-right py-4">{part.batch_size}</td>
                     </tr>
                   ))}
                 </tbody>
-                <tfoot className="border-t-2 border-black">
-                  <tr>
-                    <td colSpan={4} className="py-2 font-bold">TOTAL</td>
-                    <td className="text-right font-bold">${supplier.total_cost.toLocaleString()}</td>
+                <tfoot className="border-t-2 border-black bg-gray-50">
+                  <tr className="text-sm">
+                    <td colSpan={4} className="py-4 pr-6 font-bold text-lg">TOTAL</td>
+                    <td className="text-right py-4 pr-6 font-bold text-lg">${supplier.total_cost.toLocaleString()}</td>
                     <td colSpan={4}></td>
                   </tr>
                 </tfoot>

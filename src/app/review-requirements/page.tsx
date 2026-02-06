@@ -111,7 +111,7 @@ export default function ReviewRequirementsPage() {
         
         <div className="p-3 bg-blue-50 border-l-4 border-blue-600">
           <div className="font-mono text-sm text-blue-900">
-            <strong>💡 Next Steps:</strong> Review the requirements below, then click "Configure POs" for each supplier to customize your purchase orders.
+            <strong>Next Steps:</strong> Review the requirements below, then click "Configure POs" for each supplier to customize your purchase orders.
           </div>
         </div>
       </Card>
@@ -122,13 +122,13 @@ export default function ReviewRequirementsPage() {
           onClick={() => setViewMode('by-supplier')}
           variant={viewMode === 'by-supplier' ? 'primary' : 'secondary'}
         >
-          📦 Grouped by Supplier
+          Grouped by Supplier
         </Button>
         <Button
           onClick={() => setViewMode('all-parts')}
           variant={viewMode === 'all-parts' ? 'primary' : 'secondary'}
         >
-          📋 All Parts
+          All Parts
         </Button>
       </div>
 
@@ -153,31 +153,31 @@ export default function ReviewRequirementsPage() {
                 <table className="w-full text-xs font-mono">
                   <thead className="border-b-2 border-black">
                     <tr>
-                      <th className="text-left py-2">Part Number</th>
-                      <th className="text-left py-2">Part Name</th>
-                      <th className="text-right py-2">Qty Needed</th>
-                      <th className="text-right py-2">In Stock</th>
-                      <th className="text-right py-2">Net Qty</th>
-                      <th className="text-right py-2">Unit Cost</th>
-                      <th className="text-right py-2">Total Cost</th>
-                      <th className="text-left py-2">Earliest Need</th>
-                      <th className="text-center py-2">Lead Time</th>
+                      <th className="text-left py-3">Part Number</th>
+                      <th className="text-left py-3">Part Name</th>
+                      <th className="text-right py-3">Qty Needed</th>
+                      <th className="text-right py-3">In Stock</th>
+                      <th className="text-right py-3">Net Qty</th>
+                      <th className="text-right py-3">Unit Cost</th>
+                      <th className="text-right py-3">Total Cost</th>
+                      <th className="text-left py-3">Earliest Need</th>
+                      <th className="text-center py-3">Lead Time</th>
                     </tr>
                   </thead>
                   <tbody>
                     {supplier.parts.map(part => (
                       <tr key={part.part_id} className="border-b border-gray-200">
-                        <td className="py-2">{part.part_number}</td>
-                        <td>{part.part_name}</td>
-                        <td className="text-right">{part.total_quantity_needed}</td>
-                        <td className="text-right">{part.current_stock}</td>
-                        <td className="text-right font-bold">{part.net_quantity_needed}</td>
-                        <td className="text-right">${part.unit_cost.toFixed(2)}</td>
-                        <td className="text-right font-bold">${part.total_cost.toLocaleString()}</td>
-                        <td className="text-left">
+                        <td className="py-3">{part.part_number}</td>
+                        <td className="py-3">{part.part_name}</td>
+                        <td className="text-right py-3">{part.total_quantity_needed}</td>
+                        <td className="text-right py-3">{part.current_stock}</td>
+                        <td className="text-right font-bold py-3">{part.net_quantity_needed}</td>
+                        <td className="text-right py-3">${part.unit_cost.toFixed(2)}</td>
+                        <td className="text-right font-bold py-3">${part.total_cost.toLocaleString()}</td>
+                        <td className="text-left py-3">
                           {new Date(parseInt(part.earliest_need_date)).toLocaleDateString()}
                         </td>
-                        <td className="text-center">{part.lead_time_days}d</td>
+                        <td className="text-center py-3">{part.lead_time_days}d</td>
                       </tr>
                     ))}
                   </tbody>
@@ -203,33 +203,33 @@ export default function ReviewRequirementsPage() {
             <table className="w-full text-sm font-mono">
               <thead className="border-b-2 border-black">
                 <tr>
-                  <th className="text-left py-2">Part Number</th>
-                  <th className="text-left py-2">Part Name</th>
-                  <th className="text-right py-2">Total Needed</th>
-                  <th className="text-right py-2">In Stock</th>
-                  <th className="text-right py-2">Net to Order</th>
-                  <th className="text-left py-2">Earliest Need</th>
-                  <th className="text-left py-2">Latest Need</th>
-                  <th className="text-right py-2"># Boats</th>
+                  <th className="text-left py-3">Part Number</th>
+                  <th className="text-left py-3">Part Name</th>
+                  <th className="text-right py-3">Total Needed</th>
+                  <th className="text-right py-3">In Stock</th>
+                  <th className="text-right py-3">Net to Order</th>
+                  <th className="text-left py-3">Earliest Need</th>
+                  <th className="text-left py-3">Latest Need</th>
+                  <th className="text-right py-3"># Boats</th>
                 </tr>
               </thead>
               <tbody>
                 {analysis.parts.map(part => (
                   <tr key={part.part_id} className="border-b border-gray-200">
-                    <td className="py-2">{part.part_number}</td>
-                    <td>{part.part_name}</td>
-                    <td className="text-right">{part.total_quantity_needed}</td>
-                    <td className="text-right">{part.current_stock}</td>
-                    <td className="text-right font-bold text-red-600">
+                    <td className="py-3">{part.part_number}</td>
+                    <td className="py-3">{part.part_name}</td>
+                    <td className="text-right py-3">{part.total_quantity_needed}</td>
+                    <td className="text-right py-3">{part.current_stock}</td>
+                    <td className="text-right font-bold text-red-600 py-3">
                       {part.net_quantity_needed}
                     </td>
-                    <td className="text-left">
+                    <td className="text-left py-3">
                       {new Date(parseInt(part.earliest_need_date)).toLocaleDateString()}
                     </td>
-                    <td className="text-left">
+                    <td className="text-left py-3">
                       {new Date(parseInt(part.latest_need_date)).toLocaleDateString()}
                     </td>
-                    <td className="text-right">{part.boats_needing.length}</td>
+                    <td className="text-right py-3">{part.boats_needing.length}</td>
                   </tr>
                 ))}
               </tbody>
