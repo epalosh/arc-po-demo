@@ -550,7 +550,7 @@ export default function ConfigurePOPage() {
                 className={`w-full ${hasStockShortages.hasShortage ? 'opacity-50 cursor-not-allowed' : ''}`}
                 title={hasStockShortages.hasShortage ? 'Cannot generate: Stock shortages detected in timeline' : ''}
               >
-                {generatingPOs ? 'Generating...' : hasStockShortages.hasShortage ? `⚠️ Stock Shortage (${poBatches.length} PO${poBatches.length > 1 ? 's' : ''})` : `Generate ${poBatches.length} PO${poBatches.length > 1 ? 's' : ''}`}
+                {generatingPOs ? 'Generating...' : hasStockShortages.hasShortage ? `Stock Shortage (${poBatches.length} PO${poBatches.length > 1 ? 's' : ''})` : `Generate ${poBatches.length} PO${poBatches.length > 1 ? 's' : ''}`}
               </Button>
             </div>
           </Card>

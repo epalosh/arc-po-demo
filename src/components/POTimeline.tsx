@@ -198,9 +198,19 @@ export function POTimeline({
   }, [poBatches, maxLeadTime, dateToPixels])
 
   // Check if the current configuration will cause stock shortages
-  const stockShortageInfo = useMemo((): { hasShortage: boolean, shortageDate: Date | null } => {
+  const stockShortageInfo = useMemo((): { 
+    hasShortage: boolean
+    shortageDate: Date | null
+    shortageDetails: Array<{
+      date: Date
+      partId: string
+      partNumber: string
+      partName: string
+      stock: number
+    }>
+  } => {
     if (poBatches.length === 0 || boatConsumption.length === 0) {
-      return { hasShortage: false, shortageDate: null }
+      return { hasShortage: false, shortageDate: null, shortageDetails: [] }
     }
 
     // Build timeline of events
@@ -269,9 +279,16 @@ export function POTimeline({
       })
     })
     
-    // Process events and check for negative stock
+    // Process events and check for negative stock FOR EACH PART
     let shortageFound = false
-    let shortageDate: Date | null = null
+    let firstShortageDate: Date | null = null
+    const shortageDetails: Array<{
+      date: Date
+      partId: string
+      partNumber: string
+      partName: string
+      stock: number
+    }> = []
     
     for (const event of events) {
       for (const [partId, quantity] of Object.entries(event.parts)) {
@@ -280,24 +297,51 @@ export function POTimeline({
         } else {
           stockByPart[partId] = (stockByPart[partId] || 0) - quantity
           
-          if (stockByPart[partId] < 0 && !shortageFound) {
-            shortageFound = true
-            shortageDate = event.date
-            console.log('SHORTAGE DETECTED:', {
-              date: event.date.toISOString(),
-              partId,
-              stock: stockByPart[partId],
-              event
-            })
+          // Check for shortage on THIS SPECIFIC PART
+          if (stockByPart[partId] < 0) {
+            if (!shortageFound) {
+              shortageFound = true
+              firstShortageDate = event.date
+            }
+            
+            // Get part details
+            const part = poBatches.flatMap(b => b.parts || []).find(p => p.part_id === partId)
+            
+            // Check if we already have a shortage for this part on this date
+            const existingShortage = shortageDetails.find(
+              s => s.date.getTime() === event.date.getTime() && s.partId === partId
+            )
+            
+            if (!existingShortage) {
+              shortageDetails.push({
+                date: event.date,
+                partId,
+                partNumber: part?.part_number || partId,
+                partName: part?.part_name || 'Unknown',
+                stock: stockByPart[partId]
+              })
+              
+              console.log('SHORTAGE DETECTED:', {
+                date: event.date.toISOString(),
+                partId,
+                partNumber: part?.part_number,
+                stock: stockByPart[partId],
+                event
+              })
+            }
           }
         }
       }
     }
     
-    return { hasShortage: shortageFound, shortageDate }
+    return { 
+      hasShortage: shortageFound, 
+      shortageDate: firstShortageDate,
+      shortageDetails
+    }
   }, [poBars, boatConsumption, initialStock])
 
-  // Calculate parts needed markers with required stock levels
+  // Calculate parts needed markers with required stock levels BY PART
   const partsNeededMarkers = useMemo(() => {
     const uniqueDates = Array.from(new Set(boatsNeeding.map(b => b.need_by_date)))
     
@@ -306,23 +350,44 @@ export function POTimeline({
       date.setHours(0, 0, 0, 0)
       const boatsOnDate = boatsNeeding.filter(b => b.need_by_date === needDate)
       
-      // Calculate the total stock required for this date
-      // This is the cumulative quantity of parts needed by all boats on this date
-      const requiredStock = boatConsumption
+      // Calculate parts needed breakdown for this date
+      const partsBreakdown: Record<string, {
+        partId: string
+        partNumber: string
+        partName: string
+        quantity: number
+      }> = {}
+      
+      boatConsumption
         .filter(boat => boat.need_by_date === needDate)
-        .reduce((total, boat) => {
-          const boatTotal = Object.values(boat.parts).reduce((sum, qty) => sum + qty, 0)
-          return total + boatTotal
-        }, 0)
+        .forEach(boat => {
+          Object.entries(boat.parts).forEach(([partId, quantity]) => {
+            if (!partsBreakdown[partId]) {
+              // Get part details from poBatches
+              const part = poBatches.flatMap(b => b.parts || []).find(p => p.part_id === partId)
+              partsBreakdown[partId] = {
+                partId,
+                partNumber: part?.part_number || partId,
+                partName: part?.part_name || 'Unknown',
+                quantity: 0
+              }
+            }
+            partsBreakdown[partId].quantity += quantity
+          })
+        })
+      
+      // Calculate total for positioning
+      const totalRequired = Object.values(partsBreakdown).reduce((sum, part) => sum + part.quantity, 0)
       
       return {
         date,
         x: dateToPixels(date),
         boats: boatsOnDate,
-        requiredStock
+        requiredStock: totalRequired,
+        partsBreakdown: Object.values(partsBreakdown)
       }
     })
-  }, [boatsNeeding, boatConsumption, dateToPixels])
+  }, [boatsNeeding, boatConsumption, dateToPixels, poBatches])
 
   // Calculate cumulative stock at a given date
   const getStockAtDate = (targetDate: Date): Record<string, { 
@@ -452,14 +517,22 @@ export function POTimeline({
     })
     
     // Calculate total stock at each point in time
-    const dataPoints: Array<{ date: Date, x: number, totalStock: number }> = []
+    // IMPORTANT: Track if ANY individual part is negative
+    const dataPoints: Array<{ 
+      date: Date
+      x: number
+      totalStock: number
+      hasNegativePart: boolean
+    }> = []
     
     // Starting point
     const initialTotal = Object.values(stockByPart).reduce((sum, qty) => sum + qty, 0)
+    const initialHasNegative = Object.values(stockByPart).some(qty => qty < 0)
     dataPoints.push({
       date: new Date(startDate),
       x: dateToPixels(startDate),
-      totalStock: initialTotal
+      totalStock: initialTotal,
+      hasNegativePart: initialHasNegative
     })
     
     // Process each event
@@ -478,20 +551,25 @@ export function POTimeline({
       
       // After this event
       const newTotal = Object.values(stockByPart).reduce((sum, qty) => sum + qty, 0)
+      // Check if ANY part is negative
+      const hasNegativePart = Object.values(stockByPart).some(qty => qty < 0)
       
       dataPoints.push({
         date: event.date,
         x: dateToPixels(event.date),
-        totalStock: newTotal
+        totalStock: newTotal,
+        hasNegativePart
       })
     })
     
     // Ending point
     const finalTotal = Object.values(stockByPart).reduce((sum, qty) => sum + qty, 0)
+    const finalHasNegative = Object.values(stockByPart).some(qty => qty < 0)
     dataPoints.push({
       date: new Date(endDate),
       x: dateToPixels(endDate),
-      totalStock: finalTotal
+      totalStock: finalTotal,
+      hasNegativePart: finalHasNegative
     })
     
     // Find min/max for scaling - use actual data range
@@ -512,11 +590,19 @@ export function POTimeline({
           <div className="font-mono text-sm font-bold text-red-900 mb-2 flex items-center gap-2">
             <span>STOCK SHORTAGE DETECTED</span>
           </div>
-          <div className="font-mono text-sm text-red-800">
-            Parts will run out before all boats can be completed. 
-            {stockShortageInfo.shortageDate && (
-              <span> Stock will go negative on {stockShortageInfo.shortageDate.toLocaleDateString()}.</span>
-            )}
+          <div className="font-mono text-sm text-red-800 mb-3">
+            The following parts will run out before all boats can be completed:
+          </div>
+          <div className="space-y-2 mb-3 max-h-48 overflow-y-auto">
+            {stockShortageInfo.shortageDetails.map((shortage, idx) => (
+              <div key={idx} className="font-mono text-xs text-red-700 bg-red-100 p-2 rounded border border-red-300">
+                <div className="font-bold">{shortage.partNumber} - {shortage.partName}</div>
+                <div className="flex justify-between items-center mt-1">
+                  <span>Date: {shortage.date.toLocaleDateString()}</span>
+                  <span className="font-bold">Stock will be: {shortage.stock} units</span>
+                </div>
+              </div>
+            ))}
           </div>
           <div className="font-mono text-xs text-red-700 mt-2">
             Adjust your spreading strategy: reduce number of batches or order earlier to ensure parts arrive before they're needed.
@@ -708,7 +794,7 @@ export function POTimeline({
                     return verticalPadding + (normalizedValue * usableHeight)
                   }
                   
-                  const hasNegative = stockGraphData.dataPoints.some(p => p.totalStock < 0)
+                  const hasNegative = stockGraphData.dataPoints.some(p => p.hasNegativePart)
                   const zeroY = getProportionalY(0)
                   
                   // Helper function to build segments split by positive/negative
@@ -726,7 +812,7 @@ export function POTimeline({
                     stockGraphData.dataPoints.forEach((point, idx) => {
                       const x = point.x - LEFT_MARGIN
                       const y = getProportionalY(point.totalStock)
-                      const isNegative = point.totalStock < 0
+                      const isNegative = point.hasNegativePart
                       
                       if (idx === 0) {
                         // Start first segment
@@ -738,9 +824,9 @@ export function POTimeline({
                         const prevPoint = stockGraphData.dataPoints[idx - 1]
                         const prevX = prevPoint.x - LEFT_MARGIN
                         const prevY = getProportionalY(prevPoint.totalStock)
-                        const prevIsNegative = prevPoint.totalStock < 0
+                        const prevIsNegative = prevPoint.hasNegativePart
                         
-                        // Check if we're crossing zero
+                        // Check if we're crossing zero (i.e., any part goes from positive to negative or vice versa)
                         if (isNegative !== prevIsNegative) {
                           // Calculate intersection point with zero line
                           // Linear interpolation to find where line crosses zero
@@ -809,8 +895,8 @@ export function POTimeline({
                         const y = getProportionalY(point.totalStock)
                         const prevY = getProportionalY(prevPoint.totalStock)
                         
-                        const isNegative = point.totalStock < 0
-                        const prevIsNegative = prevPoint.totalStock < 0
+                        const isNegative = point.hasNegativePart
+                        const prevIsNegative = prevPoint.hasNegativePart
                         
                         // Determine color for this segment
                         const segmentColor = (isNegative || prevIsNegative) ? 'rgb(239, 68, 68)' : 'rgb(34, 197, 94)'
@@ -847,7 +933,7 @@ export function POTimeline({
                       {stockGraphData.dataPoints.map((point, idx) => {
                         const x = point.x - LEFT_MARGIN
                         const y = getProportionalY(point.totalStock)
-                        const isNegative = point.totalStock < 0
+                        const isNegative = point.hasNegativePart
                         
                         return (
                           <circle
@@ -1019,15 +1105,33 @@ export function POTimeline({
                   transform: 'translate(-50%, -50%)'
                 }}
               >
-                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-3 px-3 py-2 bg-purple-900 text-white font-mono text-xs rounded whitespace-nowrap shadow-xl border-2 border-purple-600">
+                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-3 px-3 py-2 bg-purple-900 text-white font-mono text-xs rounded whitespace-nowrap shadow-xl border-2 border-purple-600 max-w-xs">
                   <div className="font-bold mb-1 text-purple-200">Parts Required</div>
-                  <div className="mb-1">{formatShortDate(marker.date)}</div>
-                  <div className="font-bold text-purple-300 mb-1">
-                    Total Required: {marker.requiredStock} units
+                  <div className="mb-2">{formatShortDate(marker.date)}</div>
+                  
+                  {/* Parts Breakdown */}
+                  {marker.partsBreakdown.length > 0 && (
+                    <div className="border-t border-purple-700 pt-2 mb-2 space-y-1">
+                      {marker.partsBreakdown.map((part, pidx) => (
+                        <div key={pidx} className="flex justify-between gap-4 text-purple-200">
+                          <span className="truncate">{part.partNumber}</span>
+                          <span className="font-bold text-purple-300 whitespace-nowrap">{part.quantity} units</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  
+                  <div className="border-t border-purple-700 pt-2 mb-2">
+                    <div className="flex justify-between gap-4">
+                      <span className="font-bold text-purple-200">Total:</span>
+                      <span className="font-bold text-purple-300">{marker.requiredStock} units</span>
+                    </div>
                   </div>
+                  
                   <div className="border-t border-purple-700 pt-1 mt-1">
+                    <div className="text-purple-400 text-[10px] mb-1">Boats needing parts:</div>
                     {marker.boats.map((boat, bidx) => (
-                      <div key={bidx} className="text-purple-200">• {boat.boat_name}</div>
+                      <div key={bidx} className="text-purple-200 text-[10px]">• {boat.boat_name}</div>
                     ))}
                   </div>
                 </div>
@@ -1049,11 +1153,15 @@ export function POTimeline({
         </div>
         <div className="flex items-center gap-2">
           <div className="w-8 h-1 bg-green-600 opacity-50"></div>
-          <span><strong>Background Graph:</strong> Total Stock Level (All Parts)</span>
+          <span><strong>Green Graph:</strong> Total Stock (All Parts)</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-1 bg-red-500 opacity-50"></div>
+          <span><strong>Red Graph:</strong> ANY Part Below Zero</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-0.5 h-4 bg-black"></div>
-          <span><strong>Hover Line:</strong> View stock at any date (cumulative)</span>
+          <span><strong>Hover Line:</strong> View stock at any date (per-part)</span>
         </div>
       </div>
     </div>
