@@ -50,7 +50,8 @@ export default function ConfigurePOPage() {
       setLoading(true)
       
       const calculator = new RequirementsCalculator(supabase, selectedEntity.id)
-      const result = await calculator.calculate(10)
+      // Use 0% safety stock to match the review-requirements page
+      const result = await calculator.calculate(0)
       
       const supplierReq = result.suppliers.find(s => s.supplier_id === supplierId)
       if (!supplierReq) {
@@ -255,8 +256,15 @@ export default function ConfigurePOPage() {
     try {
       setGeneratingPOs(true)
       
+      // Calculate max lead time for required_by_date
+      const maxLeadTime = Math.max(...supplier.parts.map(p => p.lead_time_days))
+      
       // Create each PO batch
       for (const batch of poBatches) {
+        // Calculate required delivery date (order date + lead time)
+        const requiredByDate = new Date(batch.order_date)
+        requiredByDate.setDate(requiredByDate.getDate() + maxLeadTime)
+        
         // Create PO
         const { data: po, error: poError } = await supabase
           .from('purchase_orders')
@@ -264,7 +272,7 @@ export default function ConfigurePOPage() {
             entity_id: selectedEntity.id,
             supplier_id: supplier.supplier_id,
             order_date: batch.order_date,
-            required_by_date: batch.order_date, // Can be refined
+            required_by_date: requiredByDate.toISOString().split('T')[0],
             status: 'draft',
             total_amount: batch.total_cost,
             generated_by_system: false, // User-configured, not auto-generated
@@ -497,16 +505,6 @@ export default function ConfigurePOPage() {
                   </div>
                 </div>
               )}
-
-              <div className="p-3 bg-yellow-50 border-l-4 border-yellow-600">
-                <div className="font-mono text-xs text-yellow-900">
-                  <strong>📅 Strategy Impact:</strong>
-                  {spreadStrategy === 'single' && ' All parts ordered at once for maximum efficiency.'}
-                  {spreadStrategy === 'weekly' && ` ${numBatches} POs spread ${7} days apart.`}
-                  {spreadStrategy === 'bi-weekly' && ` ${numBatches} POs spread ${14} days apart.`}
-                  {spreadStrategy === 'monthly' && ` ${numBatches} POs spread ${30} days apart.`}
-                </div>
-              </div>
             </div>
           </Card>
 

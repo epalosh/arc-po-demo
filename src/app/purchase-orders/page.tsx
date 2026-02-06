@@ -25,6 +25,7 @@ export default function PurchaseOrdersPage() {
   const [selectedPO, setSelectedPO] = useState<POWithDetails | null>(null)
   const [poLines, setPOLines] = useState<POLineWithDetails[]>([])
   const [generatingPDF, setGeneratingPDF] = useState(false)
+  const [clearingPOs, setClearingPOs] = useState(false)
 
   useEffect(() => {
     if (selectedEntity) {
@@ -126,6 +127,49 @@ export default function PurchaseOrdersPage() {
     }
   }
 
+  async function clearAllPOs() {
+    if (!selectedEntity) return
+    
+    const confirmMessage = `Are you sure you want to delete ALL ${purchaseOrders.length} purchase orders for ${selectedEntity.name}?\n\nThis action cannot be undone and will also delete all associated PO line items.`
+    
+    if (!confirm(confirmMessage)) {
+      return
+    }
+    
+    // Double confirmation for safety
+    if (!confirm('This is your final warning. Delete all POs?')) {
+      return
+    }
+    
+    try {
+      setClearingPOs(true)
+      
+      // Delete all PO lines first (foreign key constraint)
+      const { error: linesError } = await supabase
+        .from('purchase_order_lines')
+        .delete()
+        .eq('entity_id', selectedEntity.id)
+      
+      if (linesError) throw linesError
+      
+      // Delete all POs
+      const { error: posError } = await supabase
+        .from('purchase_orders')
+        .delete()
+        .eq('entity_id', selectedEntity.id)
+      
+      if (posError) throw posError
+      
+      alert(`Successfully deleted all ${purchaseOrders.length} purchase orders`)
+      await loadPurchaseOrders()
+    } catch (error) {
+      console.error('Error clearing POs:', error)
+      alert('Error clearing purchase orders: ' + (error instanceof Error ? error.message : 'Unknown error'))
+    } finally {
+      setClearingPOs(false)
+    }
+  }
+
   function getStatusColor(status: string) {
     switch (status) {
       case 'draft': return 'text-gray-600'
@@ -142,6 +186,15 @@ export default function PurchaseOrdersPage() {
     <div className="max-w-7xl mx-auto px-6 py-8">
       <div className="flex justify-between items-center mb-8">
         <h1 className="font-mono text-3xl font-bold text-black">Purchase Orders</h1>
+        {purchaseOrders.length > 0 && (
+          <Button
+            variant="secondary"
+            onClick={clearAllPOs}
+            disabled={clearingPOs || !selectedEntity}
+          >
+            {clearingPOs ? 'Clearing...' : 'Clear All POs'}
+          </Button>
+        )}
       </div>
 
       {!selectedEntity ? (

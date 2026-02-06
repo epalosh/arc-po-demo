@@ -8,11 +8,11 @@ import { EntitySelector } from './EntitySelector'
 const primaryNavItems = [
   { href: '/', label: 'Dashboard' },
   { href: '/production-schedule', label: 'Production Schedule' },
+  { href: '/parts', label: 'Inventory' },
   { href: '/generate', label: 'Generate POs' },
 ]
 
 const menuItems = [
-  { href: '/parts', label: 'Parts' },
   { href: '/suppliers', label: 'Suppliers' },
   { href: '/supplier-parts', label: 'Supplier Parts' },
   { href: '/boats', label: 'Boat Types' },

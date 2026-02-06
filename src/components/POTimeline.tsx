@@ -530,7 +530,7 @@ export function POTimeline({
           <span className="font-bold">Start:</span> {formatDate(startDate)}
         </div>
         <div>
-          <span className="font-bold">Duration:</span> {totalDays} days ({PIXELS_PER_DAY}px/day)
+          <span className="font-bold">Duration:</span> {totalDays} days
         </div>
         <div>
           <span className="font-bold">End:</span> {formatDate(endDate)}

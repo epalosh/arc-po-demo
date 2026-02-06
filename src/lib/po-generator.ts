@@ -351,6 +351,12 @@ export class POGenerator {
     const savedPOs = []
     
     for (const group of poGroups) {
+      // Calculate required_by_date as the earliest need date from all line items
+      const earliestRequiredDate = group.lines.reduce((earliest, line) => {
+        const lineDate = new Date(line.required_by_date)
+        return lineDate < earliest ? lineDate : earliest
+      }, new Date(group.lines[0].required_by_date))
+      
       // Create PO
       const { data: po, error: poError } = await this.supabase
         .from('purchase_orders')
@@ -358,7 +364,7 @@ export class POGenerator {
           entity_id: this.entityId,
           supplier_id: group.supplier_id,
           order_date: group.order_date,
-          required_by_date: group.order_date, // Will be updated based on lines
+          required_by_date: earliestRequiredDate.toISOString().split('T')[0],
           status: 'draft',
           total_amount: group.total_amount,
           generated_by_system: true,

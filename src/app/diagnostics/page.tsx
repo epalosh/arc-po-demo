@@ -249,7 +249,7 @@ export default function DiagnosticPage() {
                           {part.net_requirement}
                         </td>
                         <td className="text-center">
-                          {part.has_supplier ? '✓' : '✗'}
+                          {part.has_supplier ? 'Yes' : 'No'}
                         </td>
                         <td className="text-right">{part.supplier_count}</td>
                       </tr>
@@ -267,7 +267,7 @@ export default function DiagnosticPage() {
             <>
               <div className="mb-4 p-3 bg-yellow-50 border-l-4 border-yellow-600">
                 <div className="font-mono text-sm text-yellow-900">
-                  <strong>⚠️ Final Inventory Projection:</strong> Shows expected stock levels after fulfilling all scheduled boats. 
+                  <strong>Final Inventory Projection:</strong> Shows expected stock levels after fulfilling all scheduled boats. 
                   Negative values indicate parts that need to be ordered.
                 </div>
               </div>
@@ -275,35 +275,35 @@ export default function DiagnosticPage() {
                 <table className="w-full text-sm font-mono">
                   <thead className="border-b-2 border-black">
                     <tr>
-                      <th className="text-left py-2">Part Number</th>
-                      <th className="text-left py-2">Part Name</th>
-                      <th className="text-right py-2">Initial Stock</th>
-                      <th className="text-right py-2">Total Consumed</th>
-                      <th className="text-right py-2">Final Stock</th>
-                      <th className="text-left py-2">Status</th>
+                      <th className="text-left py-2 px-2">Part Number</th>
+                      <th className="text-left py-2 px-2">Part Name</th>
+                      <th className="text-right py-2 px-2 w-28">Initial Stock</th>
+                      <th className="text-right py-2 px-2 w-32">Total Consumed</th>
+                      <th className="text-right py-2 px-2 w-28">Final Stock</th>
+                      <th className="text-left py-2 px-2 w-40">Status</th>
                     </tr>
                   </thead>
                   <tbody>
                     {data.finalInventorySummary.map((item: any, idx: number) => (
                       <tr key={idx} className="border-b border-gray-200">
-                        <td className="py-2">{item.part_number}</td>
-                        <td>{item.part_name}</td>
-                        <td className="text-right">{item.initial_stock}</td>
-                        <td className="text-right">{item.total_consumed}</td>
-                        <td className={`text-right font-bold ${
+                        <td className="py-2 px-2">{item.part_number}</td>
+                        <td className="py-2 px-2">{item.part_name}</td>
+                        <td className="text-right py-2 px-2">{item.initial_stock}</td>
+                        <td className="text-right py-2 px-2">{item.total_consumed}</td>
+                        <td className={`text-right font-bold py-2 px-2 ${
                           item.final_stock < 0 ? 'text-red-600' : 
                           item.final_stock === 0 ? 'text-orange-600' : 
                           'text-green-600'
                         }`}>
                           {item.final_stock}
                         </td>
-                        <td className="text-left">
+                        <td className="text-left py-2 px-2">
                           {item.final_stock < 0 ? (
-                            <span className="text-red-600">⚠️ Need {Math.abs(item.final_stock)} more</span>
+                            <span className="text-red-600">Need {Math.abs(item.final_stock)} more</span>
                           ) : item.final_stock === 0 ? (
-                            <span className="text-orange-600">⚠️ Depleted</span>
+                            <span className="text-orange-600">Depleted</span>
                           ) : (
-                            <span className="text-green-600">✓ Sufficient</span>
+                            <span className="text-green-600">Sufficient</span>
                           )}
                         </td>
                       </tr>
@@ -351,13 +351,13 @@ export default function DiagnosticPage() {
             })
             
             if (partsWithoutSuppliers.length === 0) {
-              return <div className="font-mono text-sm text-green-600">✓ All parts in active boat types have supplier relationships</div>
+              return <div className="font-mono text-sm text-green-600">All parts in active boat types have supplier relationships</div>
             }
             
             return (
               <div className="space-y-2">
                 <div className="font-mono text-sm text-red-600 mb-3">
-                  ⚠ {partsWithoutSuppliers.length} parts need supplier relationships
+                  {partsWithoutSuppliers.length} parts need supplier relationships
                 </div>
                 {partsWithoutSuppliers.map((part: any, idx: number) => (
                   <div key={idx} className="font-mono text-sm border-l-4 border-red-600 pl-3 py-2">
