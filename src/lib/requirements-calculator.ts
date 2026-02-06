@@ -61,9 +61,9 @@ export class RequirementsCalculator {
     private entityId: string
   ) {}
 
-  async calculate(safetyStockPercentage: number = 10): Promise<RequirementsAnalysis> {
+  async calculate(safetyStockPercentage: number = 10, startDate?: string, endDate?: string): Promise<RequirementsAnalysis> {
     // Step 1: Get scheduled boats
-    const boats = await this.getScheduledBoats()
+    const boats = await this.getScheduledBoats(startDate, endDate)
     
     if (!boats || boats.length === 0) {
       throw new Error('No scheduled boats found')
@@ -111,8 +111,8 @@ export class RequirementsCalculator {
     }
   }
 
-  private async getScheduledBoats(): Promise<BoatWithType[]> {
-    const { data, error } = await this.supabase
+  private async getScheduledBoats(startDate?: string, endDate?: string): Promise<BoatWithType[]> {
+    let query = this.supabase
       .from('boats')
       .select(`
         *,
@@ -120,7 +120,16 @@ export class RequirementsCalculator {
       `)
       .eq('entity_id', this.entityId)
       .in('status', ['scheduled', 'in_progress'])
-      .order('due_date')
+    
+    // Apply date filters if provided
+    if (startDate) {
+      query = query.gte('due_date', startDate)
+    }
+    if (endDate) {
+      query = query.lte('due_date', endDate)
+    }
+    
+    const { data, error } = await query.order('due_date')
     
     if (error) throw error
     
