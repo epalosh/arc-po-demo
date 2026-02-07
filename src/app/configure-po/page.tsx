@@ -411,17 +411,13 @@ export default function ConfigurePOPage() {
 
   async function handleGeneratePOs() {
     if (!selectedEntity || !supplier) return
-    
     // Prevent generation if there are stock shortages
     if (hasStockShortages.hasShortage) {
       const firstShortage = hasStockShortages.shortageEvents[0]
       alert(`Cannot generate POs: Stock shortage detected on ${firstShortage.date.toLocaleDateString()}. Part ${firstShortage.part} will have ${firstShortage.stock} units (negative stock). Please adjust your spreading strategy to ensure earlier deliveries.`)
       return
     }
-    
-    if (!confirm(`Generate ${poBatches.length} purchase order(s) for ${supplier.supplier_name}?`)) {
-      return
-    }
+    // Confirmation popup removed
     
     try {
       setGeneratingPOs(true)
@@ -470,8 +466,8 @@ export default function ConfigurePOPage() {
         if (linesError) throw linesError
       }
       
-      alert(`Successfully generated ${poBatches.length} purchase order(s)!`)
-      router.push('/purchase-orders')
+  // Success alert removed; just redirect
+  router.push('/purchase-orders')
     } catch (err) {
       console.error('Error generating POs:', err)
       alert('Failed to generate purchase orders: ' + (err instanceof Error ? err.message : 'Unknown error'))

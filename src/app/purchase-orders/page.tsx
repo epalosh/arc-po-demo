@@ -201,22 +201,57 @@ export default function PurchaseOrdersPage() {
 
   async function downloadSelectedPOs() {
     if (selectedPOIds.size === 0) {
-      alert('Please select at least one PO to download')
+      // No POs selected; do nothing
       return
     }
 
     try {
       setDownloadingBatch(true)
-      
       const selectedPOs = purchaseOrders.filter(po => selectedPOIds.has(po.id))
-      
+      const pdfBlobs: { name: string, blob: Blob }[] = []
       for (const po of selectedPOs) {
-        await downloadPDF(po)
-        // Small delay between downloads to avoid browser blocking
-        await new Promise(resolve => setTimeout(resolve, 300))
+        // Get full supplier details
+        const { data: supplier } = await supabase
+          .from('suppliers')
+          .select('*')
+          .eq('id', po.supplier_id)
+          .single()
+        // Get PO lines with part details
+        const { data: lines } = await supabase
+          .from('purchase_order_lines')
+          .select('*, parts(part_number, name, description)')
+          .eq('po_id', po.id)
+        if (!supplier || !lines) continue
+        const pdfData = {
+          po_number: po.po_number,
+          order_date: po.order_date,
+          required_by_date: po.required_by_date,
+          supplier: {
+            name: supplier.name,
+            contact_name: supplier.contact_name,
+            address: supplier.address,
+            phone: supplier.phone,
+            email: supplier.email
+          },
+          lines: lines.map(line => ({
+            part_number: line.parts?.part_number || 'N/A',
+            part_name: line.parts?.name || 'Unknown Part',
+            description: line.parts?.description,
+            quantity: line.quantity,
+            unit_price: line.unit_price,
+            line_total: line.line_total
+          })),
+          total_amount: po.total_amount,
+          notes: po.notes,
+          terms: supplier.payment_terms || undefined
+        }
+        const pdfBlob = await generatePOPDF(pdfData, false)
+        pdfBlobs.push({ name: `PO-${po.po_number}.pdf`, blob: pdfBlob })
       }
-      
-      alert(`Downloaded ${selectedPOs.length} PO(s)`)
+      if (pdfBlobs.length > 0) {
+        const { downloadZip } = await import('@/lib/zip-download')
+        await downloadZip(pdfBlobs, 'POs.zip')
+      }
     } catch (error) {
       console.error('Error downloading PDFs:', error)
       alert('Error downloading PDFs')
@@ -245,38 +280,24 @@ export default function PurchaseOrdersPage() {
 
   async function clearAllPOs() {
     if (!selectedEntity) return
-    
-    const confirmMessage = `Are you sure you want to delete ALL ${purchaseOrders.length} purchase orders for ${selectedEntity.name}?\n\nThis action cannot be undone and will also delete all associated PO line items.`
-    
-    if (!confirm(confirmMessage)) {
-      return
-    }
-    
-    // Double confirmation for safety
-    if (!confirm('This is your final warning. Delete all POs?')) {
-      return
-    }
-    
+    // Confirmation popups removed; action proceeds immediately
     try {
       setClearingPOs(true)
-      
       // Delete all PO lines first (foreign key constraint)
       const { error: linesError } = await supabase
         .from('purchase_order_lines')
         .delete()
         .eq('entity_id', selectedEntity.id)
-      
       if (linesError) throw linesError
-      
       // Delete all POs
       const { error: posError } = await supabase
         .from('purchase_orders')
         .delete()
         .eq('entity_id', selectedEntity.id)
-      
       if (posError) throw posError
-      
-      alert(`Successfully deleted all ${purchaseOrders.length} purchase orders`)
+      // Reset selected POs after clearing
+      setSelectedPOIds(new Set())
+      // Success alert removed; just reload
       await loadPurchaseOrders()
     } catch (error) {
       console.error('Error clearing POs:', error)

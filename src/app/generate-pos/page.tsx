@@ -22,7 +22,7 @@ export default function ReviewRequirementsPage() {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [expandedSuppliers, setExpandedSuppliers] = useState<Set<string>>(new Set())
   const [safetyMargins, setSafetyMargins] = useState<Record<string, number>>({})
-  const [showHorizonConfig, setShowHorizonConfig] = useState(false)
+  // Removed planning horizon config popover state
   const [startDate, setStartDate] = useState<string>('')
   const [endDate, setEndDate] = useState<string>('')
 
@@ -58,17 +58,7 @@ export default function ReviewRequirementsPage() {
     }
   }
 
-  const handleRecalculateWithDates = () => {
-    loadRequirements(startDate || undefined, endDate || undefined)
-    setShowHorizonConfig(false)
-  }
-
-  const handleResetDates = () => {
-    setStartDate('')
-    setEndDate('')
-    loadRequirements()
-    setShowHorizonConfig(false)
-  }
+  // Removed planning horizon config popover handlers
 
   const toggleRow = (partId: string) => {
     const newExpanded = new Set(expandedRows)
@@ -178,12 +168,6 @@ export default function ReviewRequirementsPage() {
             <span className="font-mono text-xs text-black">
               {new Date(analysis.planning_horizon_start).toLocaleDateString()} - {new Date(analysis.planning_horizon_end).toLocaleDateString()}
             </span>
-            <button 
-              onClick={() => setShowHorizonConfig(!showHorizonConfig)} 
-              className="text-xs py-1 px-3 bg-black hover:bg-gray-800 text-white font-mono transition-colors ml-2 rounded"
-            >
-              {showHorizonConfig ? 'Cancel' : 'Edit'}
-            </button>
           </div>
         </div>
         
@@ -222,74 +206,7 @@ export default function ReviewRequirementsPage() {
           </div>
         </div>
         
-        {/* Date Edit Popover */}
-        {showHorizonConfig && (
-          <div className="mt-6 bg-white rounded-lg p-6 border border-black">
-            <div className="font-mono text-sm font-bold text-gray-900 mb-4">
-              Adjust Planning Horizon
-            </div>
-            
-            <div className="mb-4 p-3 bg-blue-50 rounded border-l-4 border-blue-600">
-              <div className="font-mono text-xs text-blue-900">
-                Filter boats by due date range
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-2 gap-4 mb-4">
-              <div>
-                <label className="font-mono text-xs font-semibold text-gray-700 mb-2 block">
-                  Start Date
-                </label>
-                <Input
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="w-full text-sm"
-                />
-                      </div>
-              <div>
-                <label className="font-mono text-xs font-semibold text-gray-700 mb-2 block">
-                  End Date
-                </label>
-                <Input
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="w-full text-sm"
-                />
-              </div>
-            </div>
-
-            <div className="flex gap-2 mb-4">
-              <Button 
-                onClick={handleRecalculateWithDates}
-                disabled={loading}
-                className="flex-1 text-xs py-2"
-              >
-                {loading ? 'Applying...' : 'Apply'}
-              </Button>
-              <Button 
-                onClick={handleResetDates}
-                variant="secondary"
-                disabled={loading}
-                className="flex-1 text-xs py-2"
-              >
-                Reset
-              </Button>
-            </div>
-            
-            {(startDate || endDate) && (
-              <div className="p-3 bg-green-50 rounded border-l-4 border-green-500">
-                <div className="font-mono text-xs text-green-900">
-                  <strong>Filter:</strong> 
-                  {startDate && ` From ${new Date(startDate).toLocaleDateString()}`}
-                  {startDate && endDate && ' -'}
-                  {endDate && ` To ${new Date(endDate).toLocaleDateString()}`}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+        {/* Date Edit Popover removed */}
       </div>
 
       {/* Next Steps */}
