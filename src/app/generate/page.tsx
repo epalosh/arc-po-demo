@@ -10,8 +10,8 @@ export default function GeneratePage() {
 
   useEffect(() => {
     if (selectedEntity) {
-      // Automatically redirect to review requirements
-      router.push('/review-requirements')
+      // Automatically redirect to review requirements (replace history so back button works correctly)
+      router.replace('/generate-pos')
     }
   }, [selectedEntity, router])
 

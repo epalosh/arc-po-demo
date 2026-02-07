@@ -63,7 +63,7 @@ export default function ConfigurePOPage() {
     } catch (err) {
       console.error('Error loading requirements:', err)
       alert('Failed to load supplier requirements')
-      router.push('/review-requirements')
+      router.push('/generate-pos')
     } finally {
       setLoading(false)
     }
@@ -322,8 +322,8 @@ export default function ConfigurePOPage() {
     return (
       <div className="max-w-7xl mx-auto px-6 py-8">
         <div className="font-mono text-red-600 mb-4">Supplier not found</div>
-        <Button onClick={() => router.push('/review-requirements')}>
-          Back to Requirements
+        <Button onClick={() => router.push('/generate-pos')}>
+          Back to Generate POs
         </Button>
       </div>
     )
@@ -336,8 +336,8 @@ export default function ConfigurePOPage() {
           <h1 className="font-mono text-3xl font-bold text-black">Configure POs</h1>
           <div className="font-mono text-lg text-gray-600 mt-2">{supplier.supplier_name}</div>
         </div>
-        <Button onClick={() => router.push('/review-requirements')} variant="secondary">
-          ← Back to Requirements
+        <Button onClick={() => router.back()} variant="secondary">
+          ← Back
         </Button>
       </div>
 
