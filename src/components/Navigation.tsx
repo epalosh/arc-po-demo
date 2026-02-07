@@ -32,6 +32,9 @@ export function Navigation() {
   const pathname = usePathname()
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   
+  // Disable entity selector on configure-po page
+  const isEntitySelectorDisabled = pathname?.includes('/configure-po') || false
+  
   return (
     <nav className="border-b border-black bg-white relative">
       <div className="px-6">
@@ -57,7 +60,7 @@ export function Navigation() {
             </button>
             
             <div className="border-l border-gray-300 h-8"></div>
-            <EntitySelector />
+            <EntitySelector disabled={isEntitySelectorDisabled} />
           </div>
           
           {/* Centered Logo */}
@@ -109,11 +112,8 @@ export function Navigation() {
             {/* Planner Section */}
             <div className="border-b-2 border-black">
               <div className="px-6 py-3 bg-[#0a1929] border-b border-gray-700">
-                <div className="font-mono text-xs font-bold text-white flex items-center gap-2">
+                <div className="font-mono text-xs font-bold text-white">
                   PLANNER
-                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-                  </svg>
                 </div>
               </div>
               {plannerMenuItems.map((item, index) => {
@@ -140,11 +140,8 @@ export function Navigation() {
             {/* Buyer Section */}
             <div className="border-b-2 border-black">
               <div className="px-6 py-3 bg-[#0a1929] border-b border-gray-700">
-                <div className="font-mono text-xs font-bold text-white flex items-center gap-2">
+                <div className="font-mono text-xs font-bold text-white">
                   BUYER
-                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-                  </svg>
                 </div>
               </div>
               {buyerMenuItems.map((item, index) => {

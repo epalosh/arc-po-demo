@@ -2,7 +2,11 @@
 
 import { useEntity } from '@/contexts/EntityContext'
 
-export function EntitySelector() {
+interface EntitySelectorProps {
+  disabled?: boolean
+}
+
+export function EntitySelector({ disabled = false }: EntitySelectorProps) {
   const { selectedEntity, entities, setSelectedEntity, loading, error } = useEntity()
 
   if (error) {
@@ -34,6 +38,20 @@ export function EntitySelector() {
       <div className="flex items-center gap-2">
         <span className="font-mono text-sm font-bold text-black">
           {selectedEntity?.name || entities[0].name}
+        </span>
+      </div>
+    )
+  }
+
+  // If disabled, show as text only
+  if (disabled) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="font-mono text-sm text-gray-600">
+          Entity:
+        </span>
+        <span className="font-mono text-sm font-bold text-black">
+          {selectedEntity?.name || entities[0]?.name || 'None'}
         </span>
       </div>
     )

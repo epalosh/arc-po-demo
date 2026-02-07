@@ -361,18 +361,7 @@ export default function ReviewRequirementsPage() {
                     <Button
                       onClick={(e) => {
                         e.stopPropagation()
-                        // Encode safety margins for parts from this supplier
-                        const supplierMargins: Record<string, number> = {}
-                        supplier.parts.forEach(part => {
-                          const margin = safetyMargins[part.part_id] || 0
-                          if (margin > 0) {
-                            supplierMargins[part.part_id] = margin
-                          }
-                        })
-                        const marginsParam = Object.keys(supplierMargins).length > 0 
-                          ? `&margins=${encodeURIComponent(JSON.stringify(supplierMargins))}`
-                          : ''
-                        router.push(`/configure-po?supplier=${supplier.supplier_id}${marginsParam}`)
+                        router.push(`/configure-po?supplier=${supplier.supplier_id}`)
                       }}
                     >
                       Configure POs →

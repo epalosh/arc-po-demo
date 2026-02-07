@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/Button'
 import { POTimeline } from '@/components/POTimeline'
 
 interface POBatch {
+  id: string
   order_date: string
   parts: Array<{
     part_id: string
@@ -22,28 +23,220 @@ interface POBatch {
   total_cost: number
 }
 
-type SpreadStrategy = 'single' | 'weekly' | 'bi-weekly' | 'monthly'
+interface CustomPO {
+  id: string
+  order_date: string
+  quantityMultiplier: number // Percentage of total parts (0-100)
+  partAllocations: Record<string, number> // Actual quantity per part
+}
 
 export default function ConfigurePOPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const supplierId = searchParams.get('supplier')
+  const marginsParam = searchParams.get('margins')
   const { selectedEntity } = useEntity()
   
   const [loading, setLoading] = useState(true)
   const [analysis, setAnalysis] = useState<RequirementsAnalysis | null>(null)
   const [supplier, setSupplier] = useState<SupplierRequirement | null>(null)
-  const [spreadStrategy, setSpreadStrategy] = useState<SpreadStrategy>('single')
-  const [numBatches, setNumBatches] = useState(1)
+  const [customPOs, setCustomPOs] = useState<CustomPO[]>([])
   const [generatingPOs, setGeneratingPOs] = useState(false)
+  const [safetyMargins, setSafetyMargins] = useState<Record<string, number>>({})
 
   useEffect(() => {
     if (selectedEntity && supplierId) {
-      loadSupplierRequirements()
+      // Parse safety margins from URL
+      let margins: Record<string, number> = {}
+      if (marginsParam) {
+        try {
+          margins = JSON.parse(decodeURIComponent(marginsParam))
+          setSafetyMargins(margins)
+        } catch (err) {
+          console.error('Failed to parse safety margins:', err)
+        }
+      }
+      loadSupplierRequirements(margins)
     }
-  }, [selectedEntity, supplierId])
+  }, [selectedEntity, supplierId, marginsParam])
 
-  async function loadSupplierRequirements() {
+  // Initialize with a single PO when supplier is loaded
+  useEffect(() => {
+    if (supplier && customPOs.length === 0) {
+      // Find earliest need date across all parts
+      const earliestNeedDates = supplier.parts.map(part => 
+        new Date(parseInt(part.earliest_need_date))
+      )
+      const earliestDate = new Date(Math.min(...earliestNeedDates.map(d => d.getTime())))
+      
+      // Calculate order date based on longest lead time
+      const maxLeadTime = Math.max(...supplier.parts.map(p => p.lead_time_days))
+      const baseOrderDate = new Date(earliestDate)
+      baseOrderDate.setDate(baseOrderDate.getDate() - maxLeadTime - 3) // 3 day buffer
+      
+      // Allocate all parts to the initial PO
+      const initialAllocations: Record<string, number> = {}
+      supplier.parts.forEach(part => {
+        initialAllocations[part.part_id] = part.net_quantity_needed
+      })
+      
+      setCustomPOs([{
+        id: crypto.randomUUID(),
+        order_date: baseOrderDate.toISOString().split('T')[0],
+        quantityMultiplier: 100,
+        partAllocations: initialAllocations
+      }])
+    }
+  }, [supplier])
+
+  // Helper function to redistribute parts evenly across POs
+  const redistributePartsEvenly = (pos: CustomPO[]) => {
+    if (!supplier || pos.length === 0) return pos
+    
+    const numPOs = pos.length
+    
+    // For each part, distribute quantities evenly
+    supplier.parts.forEach(part => {
+      const totalNeeded = part.net_quantity_needed
+      const baseAmount = Math.floor(totalNeeded / numPOs)
+      const remainder = totalNeeded % numPOs
+      
+      // Allocate base amount to all POs, then distribute remainder
+      pos.forEach((po, idx) => {
+        po.partAllocations[part.part_id] = baseAmount + (idx < remainder ? 1 : 0)
+      })
+    })
+    
+    // Recalculate quantity multipliers based on allocations
+    pos.forEach(po => {
+      const totalAllocated = Object.values(po.partAllocations).reduce((sum, qty) => sum + qty, 0)
+      const totalNeeded = supplier.parts.reduce((sum, part) => sum + part.net_quantity_needed, 0)
+      po.quantityMultiplier = totalNeeded > 0 ? Math.round((totalAllocated / totalNeeded) * 100) : 0
+    })
+    
+    return pos
+  }
+
+  const addPO = () => {
+    const lastPO = customPOs[customPOs.length - 1]
+    const newDate = lastPO 
+      ? new Date(new Date(lastPO.order_date).getTime() + 7 * 24 * 60 * 60 * 1000) // 7 days later
+      : new Date()
+    
+    // Add new PO with empty allocations
+    const newPO: CustomPO = {
+      id: crypto.randomUUID(),
+      order_date: newDate.toISOString().split('T')[0],
+      quantityMultiplier: 0,
+      partAllocations: {}
+    }
+    
+    const newPOs = [...customPOs, newPO]
+    
+    // Redistribute parts evenly across all POs
+    const redistributed = redistributePartsEvenly(newPOs)
+    setCustomPOs(redistributed)
+  }
+
+  const removePO = (id: string) => {
+    if (customPOs.length === 1) {
+      alert('You must have at least one PO')
+      return
+    }
+    
+    // Remove PO and redistribute parts evenly across remaining POs
+    const remainingPOs = customPOs.filter(po => po.id !== id)
+    const redistributed = redistributePartsEvenly(remainingPOs)
+    setCustomPOs(redistributed)
+  }
+
+  const updatePODate = (id: string, newDate: string) => {
+    setCustomPOs(customPOs.map(po => 
+      po.id === id ? { ...po, order_date: newDate } : po
+    ))
+  }
+
+  const updatePOQuantity = (id: string, partId: string, newQuantity: number) => {
+    if (!supplier) return
+    
+    const part = supplier.parts.find(p => p.part_id === partId)
+    if (!part) return
+    
+    // Clamp to valid range [0, total needed]
+    const clampedQuantity = Math.max(0, Math.min(part.net_quantity_needed, newQuantity))
+    
+    // Update this PO's allocation
+    const updatedPOs = customPOs.map(po => {
+      if (po.id === id) {
+        return {
+          ...po,
+          partAllocations: {
+            ...po.partAllocations,
+            [partId]: clampedQuantity
+          }
+        }
+      }
+      return po
+    })
+    
+    // Recalculate quantity multipliers
+    updatedPOs.forEach(po => {
+      const totalAllocated = Object.values(po.partAllocations).reduce((sum, qty) => sum + qty, 0)
+      const totalNeeded = supplier.parts.reduce((sum, part) => sum + part.net_quantity_needed, 0)
+      po.quantityMultiplier = totalNeeded > 0 ? Math.round((totalAllocated / totalNeeded) * 100) : 0
+    })
+    
+    setCustomPOs(updatedPOs)
+  }
+
+  // Helper to adjust all parts proportionally for a PO
+  const updatePOPercentage = (id: string, newPercentage: number) => {
+    if (!supplier) return
+    
+    const clampedPercentage = Math.max(0, Math.min(100, newPercentage))
+    
+    const updatedPOs = customPOs.map(po => {
+      if (po.id === id) {
+        const newAllocations: Record<string, number> = {}
+        supplier.parts.forEach(part => {
+          newAllocations[part.part_id] = Math.round(part.net_quantity_needed * (clampedPercentage / 100))
+        })
+        
+        return {
+          ...po,
+          quantityMultiplier: clampedPercentage,
+          partAllocations: newAllocations
+        }
+      }
+      return po
+    })
+    
+    setCustomPOs(updatedPOs)
+  }
+
+  const movePOBackward = (id: string, days: number = 1) => {
+    setCustomPOs(customPOs.map(po => {
+      if (po.id === id) {
+        const currentDate = new Date(po.order_date)
+        currentDate.setDate(currentDate.getDate() - days)
+        return { ...po, order_date: currentDate.toISOString().split('T')[0] }
+      }
+      return po
+    }))
+  }
+
+  const movePOForward = (id: string, days: number = 1) => {
+    setCustomPOs(customPOs.map(po => {
+      if (po.id === id) {
+        const currentDate = new Date(po.order_date)
+        currentDate.setDate(currentDate.getDate() + days)
+        return { ...po, order_date: currentDate.toISOString().split('T')[0] }
+      }
+      return po
+    }))
+  }
+
+  async function loadSupplierRequirements(margins: Record<string, number> = {}) {
     if (!selectedEntity || !supplierId) return
     
     try {
@@ -58,6 +251,23 @@ export default function ConfigurePOPage() {
         throw new Error('Supplier not found in requirements')
       }
       
+      // Apply safety margins to parts if they were provided
+      if (Object.keys(margins).length > 0) {
+        supplierReq.parts = supplierReq.parts.map(part => {
+          const margin = margins[part.part_id] || 0
+          if (margin > 0) {
+            // Calculate adjusted quantity with margin
+            const baseNetQty = Math.max(0, part.total_quantity_needed - part.current_stock)
+            const adjustedQty = Math.ceil(baseNetQty * (1 + margin / 100))
+            return {
+              ...part,
+              net_quantity_needed: adjustedQty
+            }
+          }
+          return part
+        })
+      }
+      
       setAnalysis(result)
       setSupplier(supplierReq)
     } catch (err) {
@@ -69,79 +279,39 @@ export default function ConfigurePOPage() {
     }
   }
 
-  // Calculate PO batches based on spread strategy
+  // Calculate PO batches based on custom PO list with actual allocations
   const poBatches = useMemo(() => {
-    if (!supplier) return []
+    if (!supplier || customPOs.length === 0) return []
     
     const batches: POBatch[] = []
     
-    // Find earliest need date across all parts
-    const earliestNeedDates = supplier.parts.map(part => 
-      new Date(parseInt(part.earliest_need_date))
-    )
-    const earliestDate = new Date(Math.min(...earliestNeedDates.map(d => d.getTime())))
-    
-    // Calculate order date based on longest lead time
-    const maxLeadTime = Math.max(...supplier.parts.map(p => p.lead_time_days))
-    const baseOrderDate = new Date(earliestDate)
-    baseOrderDate.setDate(baseOrderDate.getDate() - maxLeadTime - 3) // 3 day buffer
-    
-    if (spreadStrategy === 'single') {
-      // Single PO with all parts
-      batches.push({
-        order_date: baseOrderDate.toISOString().split('T')[0],
-        parts: supplier.parts.map(part => ({
+    // Use actual part allocations from each PO
+    customPOs.forEach((customPO) => {
+      const batchParts = supplier.parts.map(part => {
+        const quantity = customPO.partAllocations[part.part_id] || 0
+        
+        return {
           part_id: part.part_id,
           part_name: part.part_name,
           part_number: part.part_number,
-          quantity: part.net_quantity_needed,
+          quantity,
           unit_cost: part.unit_cost,
-          total_cost: part.total_cost
-        })),
-        total_cost: supplier.total_cost
-      })
-    } else {
-      // Calculate interval based on strategy
-      let daysBetweenOrders = 0
-      if (spreadStrategy === 'weekly') daysBetweenOrders = 7
-      else if (spreadStrategy === 'bi-weekly') daysBetweenOrders = 14
-      else if (spreadStrategy === 'monthly') daysBetweenOrders = 30
+          total_cost: quantity * part.unit_cost
+        }
+      }).filter(p => p.quantity > 0)
       
-      // Split each part across batches
-      for (let i = 0; i < numBatches; i++) {
-        const orderDate = new Date(baseOrderDate)
-        orderDate.setDate(orderDate.getDate() + (i * daysBetweenOrders))
-        
-        const batchParts = supplier.parts.map(part => {
-          // Distribute quantity across batches
-          const qtyPerBatch = Math.floor(part.net_quantity_needed / numBatches)
-          const isLastBatch = i === numBatches - 1
-          const quantity = isLastBatch 
-            ? part.net_quantity_needed - (qtyPerBatch * (numBatches - 1))
-            : qtyPerBatch
-          
-          return {
-            part_id: part.part_id,
-            part_name: part.part_name,
-            part_number: part.part_number,
-            quantity,
-            unit_cost: part.unit_cost,
-            total_cost: quantity * part.unit_cost
-          }
-        }).filter(p => p.quantity > 0)
-        
-        const batchTotal = batchParts.reduce((sum, p) => sum + p.total_cost, 0)
-        
-        batches.push({
-          order_date: orderDate.toISOString().split('T')[0],
-          parts: batchParts,
-          total_cost: batchTotal
-        })
-      }
-    }
+      const batchTotal = batchParts.reduce((sum, p) => sum + p.total_cost, 0)
+      
+      batches.push({
+        id: customPO.id,
+        order_date: customPO.order_date,
+        parts: batchParts,
+        total_cost: batchTotal
+      })
+    })
     
     return batches
-  }, [supplier, spreadStrategy, numBatches])
+  }, [supplier, customPOs])
 
   // Validate if stock will go negative at any point (proper cumulative validation)
   const hasStockShortages = useMemo(() => {
@@ -276,7 +446,7 @@ export default function ConfigurePOPage() {
             status: 'draft',
             total_amount: batch.total_cost,
             generated_by_system: false, // User-configured, not auto-generated
-            notes: `Configured via interactive PO builder - ${spreadStrategy} strategy`
+            notes: `Configured via interactive PO builder - ${customPOs.length} PO${customPOs.length > 1 ? 's' : ''}`
           }])
           .select()
           .single()
@@ -341,63 +511,46 @@ export default function ConfigurePOPage() {
         </Button>
       </div>
 
-      {/* Timeline Visualization */}
-      <Card title="PO Schedule Timeline">
-        <POTimeline
-          poBatches={poBatches}
-          boatsNeeding={supplier.parts.flatMap(part => part.boats_needing).reduce((unique, boat) => {
-            if (!unique.find(b => b.boat_id === boat.boat_id)) {
-              unique.push(boat)
-            }
-            return unique
-          }, [] as typeof supplier.parts[0]['boats_needing'])}
-          maxLeadTime={Math.max(...supplier.parts.map(p => p.lead_time_days))}
-          initialStock={supplier.parts.reduce((acc, part) => {
-            acc[part.part_id] = part.current_stock
-            return acc
-          }, {} as Record<string, number>)}
-          boatConsumption={supplier.parts.flatMap(part => 
-            part.boats_needing.map(boat => ({
-              boat_id: boat.boat_id,
-              boat_name: boat.boat_name,
-              need_by_date: boat.need_by_date,
-              parts: { [part.part_id]: boat.quantity }
-            }))
-          ).reduce((unique, boat) => {
-            const existing = unique.find(b => b.boat_id === boat.boat_id && b.need_by_date === boat.need_by_date)
-            if (existing) {
-              Object.assign(existing.parts, boat.parts)
-            } else {
-              unique.push(boat)
-            }
-            return unique
-          }, [] as Array<{
-            boat_id: string
-            boat_name: string
-            need_by_date: string
-            parts: Record<string, number>
-          }>)}
-        />
-      </Card>
-
+      {/* Two Column Layout */}
       <div className="grid grid-cols-3 gap-6">
-        {/* Left Column: Supplier Info & Parts */}
+        {/* Left Column: Timeline and Details */}
         <div className="col-span-2 space-y-6">
-          <Card title="Supplier Information">
-            <div className="grid grid-cols-2 gap-4 font-mono text-sm">
-              <div>
-                <span className="text-gray-600">Contact:</span> {supplier.supplier_contact || 'N/A'}
-              </div>
-              <div>
-                <span className="text-gray-600">Email:</span> {supplier.supplier_email || 'N/A'}
-              </div>
-              <div>
-                <span className="text-gray-600">Phone:</span> {supplier.supplier_phone || 'N/A'}
-              </div>
-              <div>
-                <span className="text-gray-600">Total Parts:</span> {supplier.total_parts}
-              </div>
-            </div>
+          <Card title="PO Schedule Timeline">
+            <POTimeline
+              poBatches={poBatches}
+              boatsNeeding={supplier.parts.flatMap(part => part.boats_needing).reduce((unique, boat) => {
+                if (!unique.find(b => b.boat_id === boat.boat_id)) {
+                  unique.push(boat)
+                }
+                return unique
+              }, [] as typeof supplier.parts[0]['boats_needing'])}
+              maxLeadTime={Math.max(...supplier.parts.map(p => p.lead_time_days))}
+              initialStock={supplier.parts.reduce((acc, part) => {
+                acc[part.part_id] = part.current_stock
+                return acc
+              }, {} as Record<string, number>)}
+              boatConsumption={supplier.parts.flatMap(part => 
+                part.boats_needing.map(boat => ({
+                  boat_id: boat.boat_id,
+                  boat_name: boat.boat_name,
+                  need_by_date: boat.need_by_date,
+                  parts: { [part.part_id]: boat.quantity }
+                }))
+              ).reduce((unique, boat) => {
+                const existing = unique.find(b => b.boat_id === boat.boat_id && b.need_by_date === boat.need_by_date)
+                if (existing) {
+                  Object.assign(existing.parts, boat.parts)
+                } else {
+                  unique.push(boat)
+                }
+                return unique
+              }, [] as Array<{
+                boat_id: string
+                boat_name: string
+                need_by_date: string
+                parts: Record<string, number>
+              }>)}
+            />
           </Card>
 
           <Card title="Parts Required">
@@ -417,30 +570,39 @@ export default function ConfigurePOPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {supplier.parts.map(part => (
-                    <tr key={part.part_id} className="border-b border-gray-300 text-sm">
-                      <td className="py-4 pr-6">{part.part_number}</td>
-                      <td className="py-4 pr-6">{part.part_name}</td>
-                      <td className="text-right py-4 pr-6 font-semibold">{part.net_quantity_needed}</td>
-                      <td className="text-right py-4 pr-6">${part.unit_cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                      <td className="text-right py-4 pr-6 font-semibold">${part.total_cost.toLocaleString()}</td>
-                      <td className="text-left py-4 pr-6">
-                        {new Date(parseInt(part.earliest_need_date)).toLocaleDateString()}
-                      </td>
-                      <td className="text-center py-4 pr-6">{part.lead_time_days}d</td>
-                      <td className="text-right py-4 pr-6">{part.minimum_order_quantity}</td>
-                      <td className="text-right py-4">{part.batch_size}</td>
-                    </tr>
-                  ))}
+                  {supplier.parts.map(part => {
+                    const hasMargin = safetyMargins[part.part_id] && safetyMargins[part.part_id] > 0
+                    return (
+                      <tr key={part.part_id} className="border-b border-gray-300 text-sm">
+                        <td className="py-4 pr-6">{part.part_number}</td>
+                        <td className="py-4 pr-6">{part.part_name}</td>
+                        <td className="text-right py-4 pr-6 font-semibold">
+                          {part.net_quantity_needed}
+                          {hasMargin && (
+                            <span className="ml-1 text-xs text-green-600" title={`${safetyMargins[part.part_id]}% safety margin applied`}>
+                              (+{safetyMargins[part.part_id]}%)
+                            </span>
+                          )}
+                        </td>
+                        <td className="text-right py-4 pr-6">${part.unit_cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td className="text-right py-4 pr-6 font-semibold">${part.total_cost.toLocaleString()}</td>
+                        <td className="text-left py-4 pr-6">
+                          {new Date(parseInt(part.earliest_need_date)).toLocaleDateString()}
+                        </td>
+                        <td className="text-center py-4 pr-6">{part.lead_time_days}d</td>
+                        <td className="text-right py-4 pr-6">{part.minimum_order_quantity}</td>
+                        <td className="text-right py-4">{part.batch_size}</td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
-                <tfoot className="border-t-2 border-black bg-gray-50">
-                  <tr className="text-sm">
-                    <td colSpan={4} className="py-4 pr-6 font-bold text-lg">TOTAL</td>
-                    <td className="text-right py-4 pr-6 font-bold text-lg">${supplier.total_cost.toLocaleString()}</td>
-                    <td colSpan={4}></td>
-                  </tr>
-                </tfoot>
+                {/* Remove table footer total. Add total below table, right-aligned. */}
               </table>
+            </div>
+            <div className="w-full flex justify-end">
+              <div className="bg-gray-50 py-4 pr-6 font-bold text-lg font-mono text-right" style={{ minWidth: '220px' }}>
+                TOTAL ${supplier.total_cost.toLocaleString()}
+              </div>
             </div>
           </Card>
 
@@ -452,7 +614,7 @@ export default function ConfigurePOPage() {
                 }
                 return unique
               }, [] as typeof supplier.parts[0]['boats_needing']).map(boat => (
-                <div key={boat.boat_id} className="font-mono text-sm border-l-4 border-blue-600 pl-3 py-2 bg-blue-50">
+                <div key={boat.boat_id} className="font-mono text-sm border-l-4 border-purple-600 pl-3 py-2 bg-purple-50">
                   <div className="font-bold">{boat.boat_name}</div>
                   <div className="text-xs text-gray-600">
                     Due: {new Date(boat.due_date).toLocaleDateString()} | 
@@ -462,73 +624,252 @@ export default function ConfigurePOPage() {
               ))}
             </div>
           </Card>
-        </div>
 
-        {/* Right Column: Configuration */}
-        <div className="col-span-1 space-y-6">
-          <Card title="PO Spreading Strategy">
-            <div className="space-y-4">
+          <Card title="Supplier Information">
+            <div className="grid grid-cols-2 gap-4 font-mono text-sm">
               <div>
-                <label className="font-mono text-sm font-bold mb-2 block">Strategy</label>
-                <select
-                  value={spreadStrategy}
-                  onChange={(e) => {
-                    setSpreadStrategy(e.target.value as SpreadStrategy)
-                    if (e.target.value === 'single') setNumBatches(1)
-                    else if (numBatches === 1) setNumBatches(2)
-                  }}
-                  className="w-full px-3 py-2 border-2 border-black font-mono text-sm"
-                >
-                  <option value="single">Single PO (All at Once)</option>
-                  <option value="weekly">Weekly Batches</option>
-                  <option value="bi-weekly">Bi-Weekly Batches</option>
-                  <option value="monthly">Monthly Batches</option>
-                </select>
+                <span className="text-gray-600">Contact:</span> {supplier.supplier_contact || 'N/A'}
               </div>
-
-              {spreadStrategy !== 'single' && (
-                <div>
-                  <label className="font-mono text-sm font-bold mb-2 block">
-                    Number of Batches: {numBatches}
-                  </label>
-                  <input
-                    type="range"
-                    min="2"
-                    max="12"
-                    value={numBatches}
-                    onChange={(e) => setNumBatches(parseInt(e.target.value))}
-                    className="w-full"
-                  />
-                  <div className="flex justify-between font-mono text-xs text-gray-600 mt-1">
-                    <span>2</span>
-                    <span>12</span>
-                  </div>
-                </div>
-              )}
+              <div>
+                <span className="text-gray-600">Email:</span> {supplier.supplier_email || 'N/A'}
+              </div>
+              <div>
+                <span className="text-gray-600">Phone:</span> {supplier.supplier_phone || 'N/A'}
+              </div>
+              <div>
+                <span className="text-gray-600">Total Parts:</span> {supplier.total_parts}
+              </div>
             </div>
           </Card>
+        </div>
 
-          <Card title="Preview: Generated POs">
-            <div className="space-y-3 max-h-96 overflow-y-auto">
-              {poBatches.map((batch, idx) => (
-                <div key={idx} className="border-2 border-gray-300 p-3">
-                  <div className="font-mono text-sm font-bold mb-2">
-                    PO #{idx + 1}
+        {/* Right Column: Configure Purchase Orders */}
+        <div className="col-span-1">
+          <Card>
+
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-xl font-bold font-mono">Configure</span>
+              {/* Total Allocation Indicator (x/y) */}
+              {(() => {
+                if (!supplier) return null
+                const allocationStatus = supplier.parts.map(part => {
+                  const totalAllocated = customPOs.reduce((sum, po) => sum + (po.partAllocations[part.part_id] || 0), 0)
+                  return {
+                    partId: part.part_id,
+                    partNumber: part.part_number,
+                    needed: part.net_quantity_needed,
+                    allocated: totalAllocated,
+                    isOver: totalAllocated > part.net_quantity_needed,
+                    isUnder: totalAllocated < part.net_quantity_needed,
+                    isPerfect: totalAllocated === part.net_quantity_needed
+                  }
+                })
+                const totalAllocatedVolume = allocationStatus.reduce((sum, s) => sum + s.allocated, 0)
+                const totalNeededVolume = allocationStatus.reduce((sum, s) => sum + s.needed, 0)
+                return (
+                  <span className="font-mono text-xs font-semibold text-gray-700">{totalAllocatedVolume}/{totalNeededVolume} allocated</span>
+                )
+              })()}
+            </div>
+            {/* Detailed allocation indicator, only if not perfect */}
+            {(() => {
+              if (!supplier) return null
+              const allocationStatus = supplier.parts.map(part => {
+                const totalAllocated = customPOs.reduce((sum, po) => sum + (po.partAllocations[part.part_id] || 0), 0)
+                return {
+                  partId: part.part_id,
+                  partNumber: part.part_number,
+                  needed: part.net_quantity_needed,
+                  allocated: totalAllocated,
+                  isOver: totalAllocated > part.net_quantity_needed,
+                  isUnder: totalAllocated < part.net_quantity_needed,
+                  isPerfect: totalAllocated === part.net_quantity_needed
+                }
+              })
+              const hasOverAllocation = allocationStatus.some(s => s.isOver)
+              const hasUnderAllocation = allocationStatus.some(s => s.isUnder)
+              const isPerfect = allocationStatus.every(s => s.isPerfect)
+              if (isPerfect) return null
+              return (
+                <div className={`font-mono text-xs p-3 rounded border-2 ${
+                  hasOverAllocation ? 'bg-red-50 border-red-600 text-red-900' :
+                  hasUnderAllocation ? 'bg-yellow-50 border-yellow-600 text-yellow-900' :
+                  'bg-green-50 border-green-600 text-green-900'
+                }`}>
+                  <div className="font-bold flex items-center">
+                    {hasOverAllocation ? '⚠ Over-Allocated Parts' : '⚠ Under-Allocated Parts'}
                   </div>
-                  <div className="font-mono text-xs mb-2">
-                    <div className="text-gray-600">Order Date:</div>
-                    <div className="font-bold">{new Date(batch.order_date).toLocaleDateString()}</div>
-                  </div>
-                  <div className="font-mono text-xs mb-2">
-                    <div className="text-gray-600">{batch.parts.length} parts</div>
-                    {batch.parts.map(part => (
-                      <div key={part.part_id} className="text-xs">
-                        • {part.quantity}x {part.part_number}
+                  <div className="space-y-1 max-h-32 overflow-y-auto mt-2">
+                    {allocationStatus.filter(s => !s.isPerfect).map(status => (
+                      <div key={status.partId} className="flex justify-between text-[10px]">
+                        <span className="truncate mr-2">{status.partNumber}:</span>
+                        <span className={`font-bold whitespace-nowrap ${
+                          status.isOver ? 'text-red-700' : 'text-yellow-700'
+                        }`}>
+                          {status.allocated}/{status.needed}
+                          {status.isOver && ` (+${status.allocated - status.needed})`}
+                          {status.isUnder && ` (-${status.needed - status.allocated})`}
+                        </span>
                       </div>
                     ))}
                   </div>
-                  <div className="font-mono text-sm font-bold text-blue-600 border-t pt-2">
-                    ${batch.total_cost.toLocaleString()}
+                </div>
+              )
+            })()}
+            <div className="space-y-4">
+              
+              {/* PO List */}
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {customPOs.map((po, idx) => (
+                  <div key={po.id} className="border border-gray-300 p-2 bg-gray-50">
+                    {/* Header Row: PO # and Remove Button */}
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="font-mono text-xs font-bold">
+                        PO #{idx + 1} ({po.quantityMultiplier}%)
+                      </div>
+                      <button
+                        onClick={() => removePO(po.id)}
+                        disabled={customPOs.length === 1}
+                        className="px-1.5 py-0.5 text-[10px] font-mono border border-red-600 text-red-600 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-red-50"
+                        title="Remove"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    
+                    {/* Date and Percentage Row */}
+                    <div className="space-y-3 mb-2">
+                      <div>
+                        <label className="font-mono text-[10px] text-gray-600 block mb-0.5">
+                          Order Date:
+                        </label>
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="date"
+                            value={po.order_date}
+                            onChange={(e) => updatePODate(po.id, e.target.value)}
+                            className="flex-1 px-1.5 py-0.5 border border-gray-300 font-mono text-[10px]"
+                          />
+                          <button
+                            onClick={() => movePOBackward(po.id, 1)}
+                            className="px-1.5 py-0.5 text-[10px] font-mono border border-black hover:bg-gray-200"
+                            title="Move back 1 day"
+                          >
+                            ← 1d
+                          </button>
+                          <button
+                            onClick={() => movePOForward(po.id, 1)}
+                            className="px-1.5 py-0.5 text-[10px] font-mono border border-black hover:bg-gray-200"
+                            title="Move forward 1 day"
+                          >
+                            1d →
+                          </button>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="font-mono text-[10px] text-gray-600 block mb-0.5">
+                          Adjust All:
+                        </label>
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            step="5"
+                            value={po.quantityMultiplier}
+                            onChange={(e) => updatePOPercentage(po.id, parseInt(e.target.value))}
+                            className="flex-1 accent-black"
+                            style={{ height: '20px' }}
+                          />
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            value={po.quantityMultiplier}
+                            onChange={(e) => updatePOPercentage(po.id, parseInt(e.target.value) || 0)}
+                            className="w-10 px-1 py-0.5 border border-gray-300 font-mono text-[10px] text-right"
+                          />
+                          <span className="font-mono text-[10px] text-gray-600">%</span>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* Per-part allocation details - Always visible */}
+                    {supplier && (
+                      <div className="border-t pt-1.5 mt-1.5">
+                        <div className="font-mono text-[10px] text-gray-600 mb-1">Part Quantities:</div>
+                        <div className="space-y-0.5 max-h-32 overflow-y-auto">
+                          {supplier.parts.map(part => {
+                            const allocated = po.partAllocations[part.part_id] || 0
+                            const totalAllocated = customPOs.reduce((sum, p) => 
+                              sum + (p.partAllocations[part.part_id] || 0), 0
+                            )
+                            const isOver = totalAllocated > part.net_quantity_needed
+                            const isUnder = totalAllocated < part.net_quantity_needed
+                            
+                            return (
+                              <div key={part.part_id} className="flex items-center gap-1">
+                                <span className="font-mono text-[9px] text-gray-600 truncate flex-1">
+                                  {part.part_number}
+                                </span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max={part.net_quantity_needed}
+                                  value={allocated}
+                                  onChange={(e) => updatePOQuantity(po.id, part.part_id, parseInt(e.target.value) || 0)}
+                                  className={`w-12 px-1 py-0 border font-mono text-xs text-right ${
+                                    isOver ? 'border-red-500 bg-red-50' : 
+                                    isUnder ? 'border-yellow-500 bg-yellow-50' : 
+                                    'border-gray-300'
+                                  }`}
+                                />
+                                <span className="font-mono text-xs text-gray-500 w-10">
+                                  /{part.net_quantity_needed}
+                                </span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              
+              <Button
+                onClick={addPO}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                + Add Another PO
+              </Button>
+            </div>
+          </Card>
+
+          <div className="mt-6"></div>
+          <Card title="Preview: Generated POs">
+            <div className="space-y-2 max-h-96 overflow-y-auto">
+              {poBatches.map((batch, idx) => (
+                <div key={batch.id} className="border border-blue-600 p-2">
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="font-mono text-xs font-bold">PO #{idx + 1}</div>
+                    <div className="font-mono text-xs font-bold text-blue-600">
+                      ${batch.total_cost.toLocaleString()}
+                    </div>
+                  </div>
+                  <div className="font-mono text-xs flex items-center justify-between mb-1">
+                    <span className="text-gray-600">Order Date:</span>
+                    <span className="font-bold">{new Date(batch.order_date).toLocaleDateString()}</span>
+                  </div>
+                  <div className="font-mono text-xs">
+                    <div className="text-gray-600 mb-0.5">{batch.parts.length} parts:</div>
+                    <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+                      {batch.parts.map(part => (
+                        <div key={part.part_id} className="text-xs truncate">
+                          • {part.quantity}x {part.part_number}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -544,14 +885,40 @@ export default function ConfigurePOPage() {
                 <span className="font-bold">${supplier.total_cost.toLocaleString()}</span>
               </div>
               
-              <Button
-                onClick={handleGeneratePOs}
-                disabled={generatingPOs || hasStockShortages.hasShortage}
-                className={`w-full ${hasStockShortages.hasShortage ? 'opacity-50 cursor-not-allowed' : ''}`}
-                title={hasStockShortages.hasShortage ? 'Cannot generate: Stock shortages detected in timeline' : ''}
-              >
-                {generatingPOs ? 'Generating...' : hasStockShortages.hasShortage ? `Stock Shortage (${poBatches.length} PO${poBatches.length > 1 ? 's' : ''})` : `Generate ${poBatches.length} PO${poBatches.length > 1 ? 's' : ''}`}
-              </Button>
+              {(() => {
+                // Check if allocation is perfect
+                const allocationStatus = supplier.parts.map(part => {
+                  const totalAllocated = customPOs.reduce((sum, po) => 
+                    sum + (po.partAllocations[part.part_id] || 0), 0
+                  )
+                  return {
+                    isPerfect: totalAllocated === part.net_quantity_needed,
+                    isOver: totalAllocated > part.net_quantity_needed,
+                    isUnder: totalAllocated < part.net_quantity_needed
+                  }
+                })
+                
+                const hasImperfectAllocation = !allocationStatus.every(s => s.isPerfect)
+                const canGenerate = !generatingPOs && !hasStockShortages.hasShortage && !hasImperfectAllocation
+                
+                return (
+                  <Button
+                    onClick={handleGeneratePOs}
+                    disabled={!canGenerate}
+                    className={`w-full ${!canGenerate ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    title={
+                      hasStockShortages.hasShortage ? 'Cannot generate: Stock shortages detected in timeline' :
+                      hasImperfectAllocation ? 'Cannot generate: Part allocations must match requirements exactly' :
+                      ''
+                    }
+                  >
+                    {generatingPOs ? 'Generating...' : 
+                     hasStockShortages.hasShortage ? `Stock Shortage (${poBatches.length} PO${poBatches.length > 1 ? 's' : ''})` : 
+                     hasImperfectAllocation ? `Fix Allocations (${poBatches.length} PO${poBatches.length > 1 ? 's' : ''})` :
+                     `Generate ${poBatches.length} PO${poBatches.length > 1 ? 's' : ''}`}
+                  </Button>
+                )
+              })()}
             </div>
           </Card>
         </div>

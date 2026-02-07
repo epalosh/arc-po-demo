@@ -31,64 +31,48 @@ export default function DashboardPage() {
                 </p>
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {/* Production Schedule */}
                 <Link href="/production-schedule" className="block">
-                  <Card className="hover:border-black transition-all cursor-pointer">
-                    <h2 className="font-mono text-lg font-bold text-black mb-1">
+                  <div className="bg-white border border-gray-300 hover:border-black transition-all cursor-pointer py-3 px-4">
+                    <h2 className="font-mono text-sm font-bold text-black mb-0.5">
                       Production Schedule
                     </h2>
-                    <p className="font-mono text-sm text-gray-600">
+                    <p className="font-mono text-xs text-gray-600">
                       View and manage boat production timelines and deadlines
                     </p>
-                  </Card>
+                  </div>
                 </Link>
 
                 {/* Current Inventory */}
                 <Link href="/parts" className="block">
-                  <Card className="hover:border-black transition-all cursor-pointer">
-                    <h2 className="font-mono text-lg font-bold text-black mb-1">
+                  <div className="bg-white border border-gray-300 hover:border-black transition-all cursor-pointer py-3 px-4">
+                    <h2 className="font-mono text-sm font-bold text-black mb-0.5">
                       Current Inventory
                     </h2>
-                    <p className="font-mono text-sm text-gray-600">
+                    <p className="font-mono text-xs text-gray-600">
                       Monitor parts inventory levels and stock status
                     </p>
-                  </Card>
+                  </div>
                 </Link>
 
                 {/* Boats Management */}
                 <Link href="/boats" className="block">
-                  <Card className="hover:border-black transition-all cursor-pointer">
-                    <h2 className="font-mono text-lg font-bold text-black mb-1">
+                  <div className="bg-white border border-gray-300 hover:border-black transition-all cursor-pointer py-3 px-4">
+                    <h2 className="font-mono text-sm font-bold text-black mb-0.5">
                       Boat Types
                     </h2>
-                    <p className="font-mono text-sm text-gray-600">
+                    <p className="font-mono text-xs text-gray-600">
                       Manage boat configurations and bill of materials
                     </p>
-                  </Card>
+                  </div>
                 </Link>
               </div>
             </div>
           </div>
 
-          {/* DIVIDER WITH ARROW */}
-          <div className="absolute left-1/2 top-0 bottom-0 w-1 bg-black -translate-x-1/2 z-10">
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
-              <div className="flex items-center justify-center w-12 h-12 bg-white border-4 border-black rounded-full">
-                <svg 
-                  xmlns="http://www.w3.org/2000/svg" 
-                  viewBox="0 0 24 24" 
-                  fill="none" 
-                  stroke="currentColor" 
-                  strokeWidth="3" 
-                  strokeLinecap="round" 
-                  strokeLinejoin="round"
-                  className="w-6 h-6"
-                >
-                  <polyline points="9 18 15 12 9 6" />
-                </svg>
-              </div>
-            </div>
+          {/* DIVIDER */}
+          <div className="absolute left-1/2 w-px bg-black -translate-x-1/2 z-10" style={{ top: '5rem', bottom: '8rem' }}>
           </div>
 
           {/* BUYER SECTION - Right Half */}
@@ -103,14 +87,14 @@ export default function DashboardPage() {
                 </p>
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {/* Generate POs */}
                 <Link href="/generate" className="block">
-                  <div className="bg-[#0a1929] border border-[#0a1929] hover:border-black transition-all cursor-pointer p-6">
-                    <h2 className="font-mono text-lg font-bold text-white mb-1">
+                  <div className="bg-[#0a1929] border border-[#0a1929] hover:bg-white hover:text-black transition-all cursor-pointer py-3 px-4 group">
+                    <h2 className="font-mono text-sm font-bold text-white group-hover:text-black mb-0.5">
                       Generate Purchase Orders
                     </h2>
-                    <p className="font-mono text-sm text-gray-300">
+                    <p className="font-mono text-xs text-gray-300 group-hover:text-gray-600">
                       Automatically calculate requirements and create POs
                     </p>
                   </div>
@@ -118,38 +102,38 @@ export default function DashboardPage() {
 
                 {/* View POs */}
                 <Link href="/purchase-orders" className="block">
-                  <Card className="hover:border-black transition-all cursor-pointer">
-                    <h2 className="font-mono text-lg font-bold text-black mb-1">
+                  <div className="bg-white border border-gray-300 hover:border-black transition-all cursor-pointer py-3 px-4">
+                    <h2 className="font-mono text-sm font-bold text-black mb-0.5">
                       Purchase Orders
                     </h2>
-                    <p className="font-mono text-sm text-gray-600">
+                    <p className="font-mono text-xs text-gray-600">
                       View and manage all purchase orders
                     </p>
-                  </Card>
+                  </div>
                 </Link>
 
                 {/* Suppliers */}
                 <Link href="/suppliers" className="block">
-                  <Card className="hover:border-black transition-all cursor-pointer">
-                    <h2 className="font-mono text-lg font-bold text-black mb-1">
+                  <div className="bg-white border border-gray-300 hover:border-black transition-all cursor-pointer py-3 px-4">
+                    <h2 className="font-mono text-sm font-bold text-black mb-0.5">
                       Suppliers
                     </h2>
-                    <p className="font-mono text-sm text-gray-600">
+                    <p className="font-mono text-xs text-gray-600">
                       Manage supplier relationships and contact information
                     </p>
-                  </Card>
+                  </div>
                 </Link>
 
                 {/* Supplier Parts */}
                 <Link href="/supplier-parts" className="block">
-                  <Card className="hover:border-black transition-all cursor-pointer">
-                    <h2 className="font-mono text-lg font-bold text-black mb-1">
+                  <div className="bg-white border border-gray-300 hover:border-black transition-all cursor-pointer py-3 px-4">
+                    <h2 className="font-mono text-sm font-bold text-black mb-0.5">
                       Supplier Parts
                     </h2>
-                    <p className="font-mono text-sm text-gray-600">
+                    <p className="font-mono text-xs text-gray-600">
                       Configure part pricing and supplier relationships
                     </p>
-                  </Card>
+                  </div>
                 </Link>
               </div>
             </div>

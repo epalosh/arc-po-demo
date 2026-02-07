@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef } from 'react'
+import { useMemo, useState, useRef, useEffect } from 'react'
 
 interface POTimelineProps {
   poBatches: Array<{
@@ -39,12 +39,29 @@ export function POTimeline({
 }: POTimelineProps) {
   const [hoverX, setHoverX] = useState<number | null>(null)
   const [hoveredMarkerIdx, setHoveredMarkerIdx] = useState<number | null>(null)
+  const [showLegend, setShowLegend] = useState(false)
   const timelineRef = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [containerWidth, setContainerWidth] = useState(0)
 
   // Timeline configuration - SINGLE SOURCE OF TRUTH
-  const PIXELS_PER_DAY = 24 // Increased from 8 to 24 for better spacing
-  const LEFT_MARGIN = 140 // Space for labels
+  const LEFT_MARGIN = 20 // Space for labels
   const RIGHT_MARGIN = 40
+  const MIN_CONTAINER_WIDTH = 800 // Minimum width to fill
+
+  // Measure container width on mount and resize
+  useEffect(() => {
+    if (!containerRef.current) return
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setContainerWidth(entry.contentRect.width)
+      }
+    })
+
+    observer.observe(containerRef.current)
+    return () => observer.disconnect()
+  }, [])
 
   // Calculate date range
   const { startDate, endDate, totalDays } = useMemo(() => {
@@ -84,6 +101,24 @@ export function POTimeline({
     
     return { startDate: start, endDate: end, totalDays: Math.max(days, 1) }
   }, [poBatches, boatsNeeding, maxLeadTime])
+
+  // Calculate dynamic pixels per day to fill container
+  // Either use a comfortable spacing (24px/day) or scale up to fill the container
+  const PIXELS_PER_DAY = useMemo(() => {
+    const basePixelsPerDay = 24 // Comfortable default
+    const minTimelineWidth = LEFT_MARGIN + (totalDays * basePixelsPerDay) + RIGHT_MARGIN
+    
+    // Use containerWidth or fall back to MIN_CONTAINER_WIDTH
+    const effectiveContainerWidth = containerWidth > 0 ? containerWidth : MIN_CONTAINER_WIDTH
+    
+    // If timeline would be smaller than container, scale up to fill it
+    if (minTimelineWidth < effectiveContainerWidth) {
+      const availableSpace = effectiveContainerWidth - LEFT_MARGIN - RIGHT_MARGIN
+      return Math.floor(availableSpace / totalDays)
+    }
+    
+    return basePixelsPerDay
+  }, [totalDays, containerWidth, LEFT_MARGIN, RIGHT_MARGIN, MIN_CONTAINER_WIDTH])
 
   // UNIFIED COORDINATE SYSTEM: Convert date to X pixel position
   // Places position at the CENTER of the day
@@ -143,7 +178,7 @@ export function POTimeline({
       })
     }
     return markers
-  }, [startDate, totalDays])
+  }, [startDate, totalDays, PIXELS_PER_DAY, LEFT_MARGIN])
 
   // Generate month markers
   const monthMarkers = useMemo(() => {
@@ -153,20 +188,32 @@ export function POTimeline({
     
     while (current <= endDate) {
       const markerDate = new Date(current)
-      // Calculate grid position (start of day)
+      const nextMonth = new Date(current)
+      nextMonth.setMonth(nextMonth.getMonth() + 1)
+      
+      // Calculate start position
       const daysSinceStart = (markerDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)
       const gridX = LEFT_MARGIN + (daysSinceStart * PIXELS_PER_DAY)
       
+      // Calculate end position (either next month or end of timeline)
+      const endOfMonth = nextMonth > endDate ? endDate : nextMonth
+      const daysToEnd = (endOfMonth.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)
+      const endX = LEFT_MARGIN + (daysToEnd * PIXELS_PER_DAY)
+      
+      // Center the label in the month span
+      const centerX = (gridX + endX) / 2
+      
       markers.push({
         date: markerDate,
-        x: gridX,
+        x: centerX,
+        gridX: gridX,
         label: markerDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
       })
       current.setMonth(current.getMonth() + 1)
     }
     
     return markers
-  }, [startDate, endDate])
+  }, [startDate, endDate, PIXELS_PER_DAY, LEFT_MARGIN])
 
   // Calculate PO bars with exact pixel positions and check for stock shortages
   const poBars = useMemo(() => {
@@ -582,8 +629,6 @@ export function POTimeline({
 
   return (
     <div className="bg-white">
-      <div className="font-mono text-sm font-bold mb-3">Timeline View</div>
-      
       {/* Validation Warning */}
       {stockShortageInfo.hasShortage && (
         <div className="mb-4 p-4 bg-red-50 border-2 border-red-600 rounded">
@@ -625,6 +670,7 @@ export function POTimeline({
       
       {/* Scrollable Timeline Container */}
       <div 
+        ref={containerRef}
         className="overflow-x-auto overflow-y-visible border-2 border-gray-300 bg-gray-50 relative"
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
@@ -671,15 +717,12 @@ export function POTimeline({
               className="absolute"
               style={{ 
                 left: `${marker.x}px`,
-                top: '-40px'
+                top: '-40px',
+                transform: 'translateX(-50%)'
               }}
             >
               <div 
                 className="font-mono text-sm font-bold text-gray-700 whitespace-nowrap bg-white px-2"
-                style={{ 
-                  position: 'absolute',
-                  left: '4px'
-                }}
               >
                 {marker.label}
               </div>
@@ -967,11 +1010,6 @@ export function POTimeline({
             )}
           </div>
           
-          {/* Track Labels */}
-          <div className="absolute left-2 top-4 font-mono text-xs font-bold text-blue-600 bg-white/90 px-2 py-1 z-10 rounded shadow-sm border border-blue-200">
-            Purchase Orders
-          </div>
-          
           {/* PO Bars Track */}
           <div className="absolute top-4 left-0 right-0" style={{ height: '80px' }}>
             {poBars.map((bar) => (
@@ -1141,28 +1179,41 @@ export function POTimeline({
         </div>
       </div>
       
-      {/* Legend */}
-      <div className="flex flex-wrap gap-6 mt-4 font-mono text-xs">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-4 bg-blue-500 border-2 border-blue-700 rounded"></div>
-          <span><strong>PO Bar:</strong> Order → Delivery ({maxLeadTime}d)</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 bg-purple-500 border-2 border-purple-700 rotate-45"></div>
-          <span><strong>Diamond:</strong> Required Stock Level at Date</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-1 bg-green-600 opacity-50"></div>
-          <span><strong>Green Graph:</strong> Total Stock (All Parts)</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-1 bg-red-500 opacity-50"></div>
-          <span><strong>Red Graph:</strong> ANY Part Below Zero</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-0.5 h-4 bg-black"></div>
-          <span><strong>Hover Line:</strong> View stock at any date (per-part)</span>
-        </div>
+      {/* Legend Button and Popup */}
+      <div className="mt-4 relative">
+        <button
+          onClick={() => setShowLegend(!showLegend)}
+          className="px-2 py-1 font-mono text-xs border-2 border-black bg-white hover:bg-gray-100 transition-colors"
+        >
+          {showLegend ? 'Close Guide' : 'Timeline Guide'}
+        </button>
+        
+        {showLegend && (
+          <div className="absolute top-full left-0 mt-2 bg-white border-2 border-black shadow-lg p-4 z-50 rounded">
+            <div className="grid grid-cols-2 gap-x-8 gap-y-3 font-mono text-xs">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-4 bg-blue-500 border-2 border-blue-700 rounded flex-shrink-0"></div>
+                <span><strong>PO Bar:</strong> Order → Delivery ({maxLeadTime}d)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 bg-purple-500 border-2 border-purple-700 rotate-45 flex-shrink-0"></div>
+                <span><strong>Diamond:</strong> Required Stock Level at Date</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-1 bg-green-600 opacity-50 flex-shrink-0"></div>
+                <span><strong>Green Graph:</strong> Total Stock (All Parts)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-1 bg-red-500 opacity-50 flex-shrink-0"></div>
+                <span><strong>Red Graph:</strong> ANY Part Below Zero</span>
+              </div>
+              <div className="flex items-center gap-2 col-span-2">
+                <div className="w-0.5 h-4 bg-black flex-shrink-0"></div>
+                <span><strong>Hover Line:</strong> View stock at any date (per-part)</span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
